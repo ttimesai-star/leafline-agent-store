@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent-ready store (PayPal sandbox spike)</title>
+  <style>
+    body { font: 15px/1.4 system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; }
+    li { margin: .4rem 0; } button { margin-left: .5rem; }
+    pre { background: #f4f4f4; padding: .6rem; overflow: auto; font-size: 12px; }
+    .note { color: #666; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>Agent-ready store</h1>
+  <p class="note">Prototype, PayPal sandbox only. AI agents can use WebMCP tools: search_products, create_order, get_order_status. Payment approval always stays with the human buyer in PayPal.</p>
+  <input id="search" placeholder="Search products" autocomplete="off">
+  <ul id="products"></ul>
+  <p id="msg"></p>
+  <h3>WebMCP status</h3>
+  <pre id="webmcp">checking…</pre>
+  <h3>Order</h3>
+  <pre id="order">—</pre>
+  <script type="module" src="/store.js"></script>
+</body>
+</html>

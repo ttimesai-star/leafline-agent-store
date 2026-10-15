@@ -1,0 +1,13 @@
+{
+  "name": "paypal-agent-store",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Spike: agent-ready storefront. PayPal Orders v2 (sandbox) + WebMCP tools + per-order agent call journal.",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=22.18.0" },
+  "scripts": {
+    "start": "node src/server.ts",
+    "test": "node --test \"test/*.test.ts\""
+  }
+}
