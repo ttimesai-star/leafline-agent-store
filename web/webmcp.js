@@ -1,5 +1,9 @@
-// WebMCP tools for the storefront. Works with the native Chrome API (navigator.modelContext,
-// behind chrome://flags/#enable-webmcp-testing) and with the MCP-B polyfill (document/navigator.modelContext).
+// WebMCP tools for the storefront.
+// Verified 2026-10-16 on Chrome 155.0.8059.40 with --enable-features=WebMCP,WebMCPTesting
+// (chrome://flags/#enable-webmcp-testing): the API is document.modelContext (navigator.modelContext is
+// undefined) with registerTool / getTools / executeTool(registeredTool, argsObject) / when / ontoolchange;
+// executeTool returns the tool result serialized as a JSON string. Without the flag nothing is exposed.
+// navigator.modelContext is still checked first for older builds / polyfills.
 // Each tool calls the same JSON API as the human UI, tagged with X-Agent-Tool / X-Agent-Session headers.
 
 export function makeSessionId() {
