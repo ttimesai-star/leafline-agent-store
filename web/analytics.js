@@ -3,6 +3,8 @@
 // raw, ~1.3 MB gzipped). The layout is a pre-built report in view mode; "Edit layout" switches Studio to its
 // drag-and-drop editor so a merchant can build their own widgets on the same data.
 
+import { publishDashboardTools } from "./studio_webmcp.js";
+
 const BRAND = "#2f6b4f";
 let api = null;
 let loading = null;
@@ -168,8 +170,8 @@ export function reportState() {
   };
 }
 
-/** Load Studio once and render (or refresh the data of) the dashboard. */
-export async function showAnalytics(el, fetchAll, cfg) {
+/** Load Studio once and render (or refresh the data of) the dashboard. onTools gets the WebMCP publish result. */
+export async function showAnalytics(el, fetchAll, cfg, onTools = () => {}) {
   const rows = buildSources(await fetchAll());
   if (api) {
     api.setProperty("data", dataDefinition(rows));
@@ -179,6 +181,8 @@ export async function showAnalytics(el, fetchAll, cfg) {
     const S = window.agStudio;
     if (!S?.createStudio) throw new Error("AG Studio did not load");
     if (cfg?.agStudioLicense) S.AgStudioLicenseManager.setLicenseKey(cfg.agStudioLicense);
+    // AI module: gives Studio's built-in tools the field schema and dashboard context (needs an AI-enabled key).
+    if (cfg?.agStudioLicense && S.AgStudioAiModule) S.AgStudioModuleRegistry.registerModules([S.AgStudioAiModule]);
     const theme = S.studioTheme?.withParams?.({ accentColor: BRAND, fontFamily: "inherit" });
     api = S.createStudio(el, {
       mode: "view",
@@ -186,6 +190,10 @@ export async function showAnalytics(el, fetchAll, cfg) {
       data: dataDefinition(rows),
       ...(theme ? { theme } : {}),
       onErrorRaised: (e) => console.warn("AG Studio:", e?.message ?? e),
+      onStudioReady: (e) => {
+        if (!S.AgStudioAiModule || !cfg?.agStudioLicense) return onTools({ ok: false, mode: "off", tools: [] });
+        publishDashboardTools(e.api ?? api).then(onTools, (err) => onTools({ ok: false, mode: "error", error: String(err?.message ?? err), tools: [] }));
+      },
     });
     return api;
   });

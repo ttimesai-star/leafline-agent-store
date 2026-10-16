@@ -1,7 +1,7 @@
 """Browser end-to-end check against a running store (local or deployed), PayPal SANDBOX only.
 
 Usage: scripts/with-sandbox-env.sh python scripts/e2e_browser.py [--url http://localhost:8787] [--headed]
-         [--only human|agent|claims|mcp] [--flags]
+         [--only human|agent|claims|mcp|dashboard] [--flags]
 
 Steps (each prints PASS/FAIL with a short reason, screenshots go to data/e2e/):
   human  - add two products to the cart, pay with the PayPal JS SDK v6 button (popup), sandbox buyer approves,
@@ -14,6 +14,9 @@ Steps (each prints PASS/FAIL with a short reason, screenshots go to data/e2e/):
   mcp    - an external agent (official MCP SDK client, scripts/mcp_client.ts) connects to {url}/mcp with a buyer
            mandate, orders within it, the buyer approves the approveUrl in PayPal, the order is COMPLETED; an
            over-budget order from the same agent is refused by the store.
+  dashboard - merchant Analytics tab renders AG Studio (licensed, no watermark text) and, with --flags (native
+           WebMCP), publishes 4 read-only dashboard tools; dashboard_execute_query answers "allowed vs refused
+           agent calls by tool" through document.modelContext.executeTool.
 Reads PAYPAL_BUYER_EMAIL / PAYPAL_BUYER_PASSWORD (and MERCHANT_KEY when the server has one) from env; never prints them.
 """
 import json
@@ -251,6 +254,41 @@ def claims(page, oid):
     shot(page, "08_merchant_journal")
 
 
+DASH_QUERY = {"query": {"variant": "aggregation", "kind": "apiQuery", "axes": [{"dimensions": [{"field": {"id": "calls.tool"}, "as": "tool"}]}],
+                         "measures": [{"field": {"id": "calls.allowed", "aggregation": "sum"}, "as": "allowed"}, {"field": {"id": "calls.refused", "aggregation": "sum"}, "as": "refused"}]}}
+
+
+def dashboard(page):
+    page.goto(URL + "/merchant" + KEY_FRAG, wait_until="networkidle")
+    page.wait_for_function("() => document.querySelector('#studio')?.innerText.includes('Net revenue')", timeout=60000)
+    page.wait_for_timeout(2500)
+    text = page.locator("#studio").inner_text()
+    log("AG Studio analytics rendered", "Agent vs human commerce" in text and "Loading" not in text[:400], page.locator("#studio-note").inner_text()[:90])
+    shot(page, "11_merchant_analytics")
+    line = page.locator("#studio-mcp").inner_text()
+    if "--flags" not in ARGS:
+        log("dashboard WebMCP tools (no --flags: listed only)", "dashboard tools" in line, line[:120])
+        return
+    r = page.evaluate("""async (args) => {
+      const mc = document.modelContext || navigator.modelContext;
+      if (!mc?.getTools) return {error: 'no modelContext'};
+      const tools = await mc.getTools();
+      const t = tools.find(x => x.name === 'dashboard_execute_query');
+      if (!t) return {error: 'not registered', names: tools.map(x => x.name)};
+      const raw = await mc.executeTool(t, args);
+      return {names: tools.map(x => x.name), raw: typeof raw === 'string' ? raw : JSON.stringify(raw)};
+    }""", DASH_QUERY)
+    names = [n for n in r.get("names", []) if n.startswith("dashboard_")]
+    log("dashboard tools registered in WebMCP", len(names) == 4, ",".join(sorted(names)) or r.get("error", ""))
+    try:
+        payload = json.loads(json.loads(r.get("raw") or "{}")["content"][0]["text"])
+        rows = payload["data"]["result"]
+        co = next((x for x in rows if x.get("tool") == "create_order"), {})
+        log("agent asked the dashboard (execute_query)", bool(rows) and "allowed" in co, f"create_order allowed {co.get('allowed')} refused {co.get('refused')}, {len(rows)} tools")
+    except Exception as e:  # noqa: BLE001
+        log("agent asked the dashboard (execute_query)", False, f"{e!r} {str(r)[:160]}")
+
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -309,6 +347,8 @@ def main():
                 claims(page, oid)
             if ONLY in (None, "mcp"):
                 mcp(page)
+            if ONLY in (None, "dashboard"):
+                dashboard(page)
         except (PWTimeout, RuntimeError) as e:
             log("unexpected", False, str(e).splitlines()[0][:200])
             try:

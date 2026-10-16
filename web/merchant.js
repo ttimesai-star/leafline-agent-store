@@ -222,7 +222,14 @@ async function analytics() {
   if ($("[data-pane='analytics']").hidden) return;
   try {
     cfg ??= await rawGet("/api/config");
-    await showAnalytics($("#studio"), fetchAll, cfg);
+    await showAnalytics($("#studio"), fetchAll, cfg, (r) => {
+      const n = r.tools?.length ?? 0;
+      $("#studio-mcp").textContent = r.ok
+        ? `WebMCP: ${n} read-only dashboard tools published for the browser's agent (${r.tools.join(", ")}).`
+        : n
+          ? `WebMCP: this browser has no document.modelContext; ${n} dashboard tools would be published.`
+          : "";
+    });
     $("#studio-note").textContent = cfg.agStudioLicense
       ? "AG Studio over the store's own records: orders, order lines, agent call journal, DisputeDesk cases."
       : "AG Studio without a licence key on this server (watermark).";
