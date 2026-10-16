@@ -93,6 +93,17 @@ function orderView(o: any) {
   };
 }
 
+/** Mask API keys / bearer tokens of the providers we use before anything is logged. */
+export function maskKeys(text: string): string {
+  return text
+    .replace(/AIza[0-9A-Za-z_-]{20,}/g, "AIza***")
+    .replace(/AQ\.[0-9A-Za-z_.-]{20,}/g, "AQ.***")
+    .replace(/gsk_[0-9A-Za-z]{20,}/g, "gsk_***")
+    .replace(/sk-[0-9A-Za-z_-]{20,}/g, "sk-***")
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/g, "Bearer ***")
+    .replace(/([?&]key=)[^&\s]+/g, "$1***");
+}
+
 export function maskEmail(e: unknown): string | null {
   if (typeof e !== "string" || !e.includes("@")) return null;
   const [u, d] = e.split("@");
@@ -390,8 +401,9 @@ export function createHandler(deps: AppDeps) {
         const input = validateStep(await readJson(req, 64 * 1024));
         try {
           return send(res, 200, await agentStep(deps.llm, input));
-        } catch {
-          // Provider errors can echo request details; never forward them.
+        } catch (e) {
+          // Provider errors can echo request details; never forward them, and mask keys before logging.
+          console.warn("agent step failed:", maskKeys(String((e as Error)?.message ?? e)).slice(0, 300));
           return send(res, 502, { error: "LLM provider failed", fallback: true });
         }
       }

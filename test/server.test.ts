@@ -2,7 +2,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { createHandler, RateLimiter, maskEmail } from "../src/server.ts";
+import { createHandler, RateLimiter, maskEmail, maskKeys } from "../src/server.ts";
 import { AgentJournal } from "../src/journal.ts";
 import { OrderStore } from "../src/orders.ts";
 import { MandateStore } from "../src/mandates.ts";
@@ -218,4 +218,6 @@ test("helpers", () => {
   assert.ok(rl.allow("a", 0) && rl.allow("a", 1) && !rl.allow("a", 2) && rl.allow("a", 1001));
   assert.equal(maskEmail("sb-123@personal.example.com"), "s***@personal.example.com");
   assert.equal(maskEmail(undefined), null);
+  const leaked = maskKeys("gemini LLM HTTP 400 url ?key=AIzaSyA1234567890abcdefghijk&x=1 Bearer abc.def gsk_abcdefghijklmnopqrstuvwxyz AQ.Ab8RN6abcdefghijklmnopqrstuv");
+  for (const s of ["AIzaSyA1234567890", "abc.def", "gsk_abcdefghij", "AQ.Ab8RN6abc"]) assert.ok(!leaked.includes(s), s);
 });

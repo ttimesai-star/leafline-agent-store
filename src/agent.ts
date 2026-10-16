@@ -40,7 +40,13 @@ export function validateStep(body: any): StepInput {
         ? m.tool_calls.slice(0, 4).map((c: any) => {
             const name = str(c?.function?.name, 40);
             if (!(AGENT_TOOL_NAMES as readonly string[]).includes(name)) throw new Error(`unknown tool in history: ${name}`);
-            return { id: str(c?.id, 80), type: "function" as const, function: { name, arguments: str(c?.function?.arguments, 2000) } };
+            const sig = c?.extra_content?.google?.thought_signature;
+            return {
+              id: str(c?.id, 80),
+              type: "function" as const,
+              function: { name, arguments: str(c?.function?.arguments, 2000) },
+              ...(typeof sig === "string" && sig.length <= 16_000 ? { extra_content: { google: { thought_signature: sig } } } : {}),
+            };
           })
         : [];
       return calls.length ? { role: "assistant", content: m.content == null ? null : str(m.content), tool_calls: calls } : { role: "assistant", content: str(m.content) };
@@ -66,6 +72,6 @@ export async function agentStep(llm: Llm, input: StepInput) {
   const toolCalls = r.toolCalls
     .filter((c) => (AGENT_TOOL_NAMES as readonly string[]).includes(c.function?.name))
     .slice(0, 3)
-    .map((c, i) => ({ id: c.id || `call_${Date.now()}_${i}`, name: c.function.name, arguments: c.function.arguments || "{}" }));
+    .map((c, i) => ({ id: c.id || `call_${Date.now()}_${i}`, name: c.function.name, arguments: c.function.arguments || "{}", ...(c.extra_content ? { extra_content: c.extra_content } : {}) }));
   return { content: r.content, toolCalls, provider: r.provider, model: r.model };
 }

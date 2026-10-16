@@ -1,4 +1,4 @@
-// Vendored from DisputeDesk (github.com/ttimesai-star/disputedesk, MIT, same author) - keep in sync by hand.
+// Vendored from DisputeDesk (github.com/ttimesai-star/disputedesk, MIT, same author); local change: ToolCall.extra_content.
 // Minimal OpenAI-compatible chat client (Gemini and Groq both speak this).
 // Primary + optional fallback provider, both from env.
 // Keys stay server-side and are never logged.
@@ -14,6 +14,8 @@ export interface ToolCall {
   id: string;
   type: "function";
   function: { name: string; arguments: string };
+  /** Gemini 3 (OpenAI-compatible API) returns {google: {thought_signature}} here and requires it back in later turns. */
+  extra_content?: { google?: { thought_signature?: string } };
 }
 
 export interface ToolSpec {

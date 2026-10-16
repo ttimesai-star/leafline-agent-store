@@ -60,7 +60,7 @@ export async function runLlmAgent(task, { call, step, tools, log, maxSteps = 8 }
     const r = await step({ messages, tools: specs });
     if (r.fallback) throw Object.assign(new Error(r.error ?? "LLM unavailable"), { fallback: true });
     if (!r.toolCalls?.length) return { done: Boolean(orderId), orderId, answer: r.content ?? "", provider: r.provider, model: r.model };
-    messages.push({ role: "assistant", content: r.content ?? null, tool_calls: r.toolCalls.map((c) => ({ id: c.id, type: "function", function: { name: c.name, arguments: c.arguments } })) });
+    messages.push({ role: "assistant", content: r.content ?? null, tool_calls: r.toolCalls.map((c) => ({ id: c.id, type: "function", function: { name: c.name, arguments: c.arguments }, ...(c.extra_content ? { extra_content: c.extra_content } : {}) })) });
     for (const c of r.toolCalls) {
       let args = {};
       try {
