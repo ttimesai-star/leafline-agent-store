@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join, dirname, resolve, sep } from "node:path";
-import { randomUUID } from "node:crypto";
+import { randomUUID, randomBytes, timingSafeEqual } from "node:crypto";
 import { execSync } from "node:child_process";
 import { searchProducts, priceOrder, findProduct } from "./catalog.ts";
 import { AgentJournal, validSession } from "./journal.ts";
@@ -16,6 +16,8 @@ import { assessStoreClaim, assessPayPalDispute, type AgentContext, type DeskCase
 import { createLlm, type Llm } from "./llm.ts";
 import { composePayments, type PaymentsPort } from "./payments.ts";
 import { ToolkitPayments } from "./toolkit.ts";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { createStoreMcpServer, mcpSessionFor, validMandate } from "./mcp.ts";
 import { validateStep, agentStep } from "./agent.ts";
 
 export type { PaymentsPort };
@@ -133,6 +135,11 @@ export function createHandler(deps: AppDeps) {
   const requireMandate = deps.requireMandate ?? true;
   const writeLimiter = new RateLimiter(60, 10 * 60_000);
   const llmLimiter = new RateLimiter(60, 10 * 60_000);
+  const mcpLimiter = new RateLimiter(300, 10 * 60_000);
+  // The /mcp endpoint calls this same API over loopback; this per-process key lets those inner calls carry the
+  // outer client's IP for rate limiting (nobody else can set it).
+  const internalKey = randomBytes(16).toString("hex");
+  const isInternal = (v: unknown) => typeof v === "string" && v.length === internalKey.length && timingSafeEqual(Buffer.from(v), Buffer.from(internalKey));
   let disputeCache: { at: number; cases: DeskCase[]; error: string | null } | null = null;
 
   function agentContext(o: OrderRecord): AgentContext {
@@ -190,7 +197,8 @@ export function createHandler(deps: AppDeps) {
     const headerMandate = req.headers["x-agent-mandate"];
     const started = Date.now();
     const fwd = deps.trustProxy ? String(req.headers["x-forwarded-for"] ?? "").split(",")[0].trim() : "";
-    const ip = fwd || req.socket.remoteAddress || "unknown";
+    const innerIp = isInternal(req.headers["x-internal-mcp"]) ? String(req.headers["x-mcp-client-ip"] ?? "").slice(0, 64) : "";
+    const ip = innerIp || fwd || req.socket.remoteAddress || "unknown";
     let toolArgs: unknown = Object.fromEntries(url.searchParams);
     const journal = (ok: boolean, summary: string, orderId?: string, result?: unknown) => {
       if (!isAgent) return;
@@ -219,6 +227,29 @@ export function createHandler(deps: AppDeps) {
         if (ext === "html") headers["cross-origin-opener-policy"] = "same-origin-allow-popups";
         res.writeHead(200, headers);
         res.end(readFileSync(file));
+        return;
+      }
+
+      // ---------- MCP (Streamable HTTP, stateless): the six store tools for external agents ----------
+      if (path === "/mcp") {
+        if (req.method !== "POST") {
+          return send(res, 405, { jsonrpc: "2.0", error: { code: -32000, message: "this MCP endpoint is stateless: use POST" }, id: null }, { allow: "POST" });
+        }
+        if (!mcpLimiter.allow(ip)) throw httpError(429, "too many MCP requests, slow down");
+        const body = await readJson(req, 64 * 1024);
+        const hdr = req.headers["x-agent-mandate"];
+        const bearer = String(req.headers.authorization ?? "").match(/^Bearer\s+(md_[a-f0-9]{16})$/)?.[1];
+        const mandate = validMandate(hdr) ? hdr : validMandate(bearer) ? bearer : null;
+        const local = req.socket.localAddress ?? "127.0.0.1";
+        const inner = `http://${local.includes(":") ? `[${local}]` : local}:${req.socket.localPort}`;
+        const mcp = createStoreMcpServer({ base: inner, session: mcpSessionFor(req.headers["x-agent-session"], mandate), mandate, headers: { "x-internal-mcp": internalKey, "x-mcp-client-ip": ip } });
+        const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+        res.on("close", () => {
+          transport.close().catch(() => {});
+          mcp.close().catch(() => {});
+        });
+        await mcp.connect(transport);
+        await transport.handleRequest(req, res, body);
         return;
       }
 
