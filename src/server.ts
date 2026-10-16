@@ -19,6 +19,7 @@ import { ToolkitPayments } from "./toolkit.ts";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createStoreMcpServer, mcpSessionFor, validMandate } from "./mcp.ts";
 import { validateStep, agentStep } from "./agent.ts";
+import { seedIfEmpty } from "./demo_data.ts";
 
 export type { PaymentsPort };
 
@@ -598,7 +599,10 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const own = new PayPalClient(cfg);
   // Order status, disputes and refunds go through the official PayPal Agent Toolkit (src/toolkit.ts).
   const payments = composePayments(own, new ToolkitPayments({ token: () => own.getAccessToken(), secrets: [cfg.clientId, cfg.secret] }));
-  const dataDir = join(HERE, "..", "data");
+  const dataDir = resolve(process.env.DATA_DIR ?? join(HERE, "..", "data"));
+  // Fresh deployment (empty disk): start from the exported sandbox orders, if a seed is configured.
+  const seeded = seedIfEmpty(dataDir, process.env.DEMO_SEED_DIR ? resolve(HERE, "..", process.env.DEMO_SEED_DIR) : undefined);
+  if (seeded) console.log(`seeded ${seeded} sandbox orders from ${process.env.DEMO_SEED_DIR}`);
   const journal = new AgentJournal(join(dataDir, "agent_journal.jsonl"));
   const orders = new OrderStore(join(dataDir, "orders.json"));
   createServer(
