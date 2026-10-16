@@ -1,4 +1,5 @@
 import { $, esc, notice, getJson as rawGet, postJson as rawPost } from "./ui.js";
+import { showAnalytics, toggleEdit } from "./analytics.js";
 
 // Merchant key (server env MERCHANT_KEY). Taken from the URL fragment (#key=..., never sent to the server or its
 // logs) or typed into the header field; kept for this tab only (sessionStorage) and sent as X-Merchant-Key.
@@ -191,7 +192,11 @@ document.addEventListener("click", (e) => {
   if (t.dataset.tab) {
     document.querySelectorAll(".tabs button[data-tab]").forEach((b) => b.classList.toggle("on", b === t));
     document.querySelectorAll("[data-pane]").forEach((p) => (p.hidden = p.dataset.pane !== t.dataset.tab));
-  } else if (t.id === "refresh") refresh();
+    if (t.dataset.tab === "analytics") analytics();
+  } else if (t.id === "studio-edit") {
+    const mode = toggleEdit();
+    if (mode) t.textContent = mode === "edit" ? "Back to view" : "Edit layout";
+  } else if (t.id === "refresh") refresh().then(analytics);
   else if (t.id === "key-save") {
     const v = $("#key-in").value.trim();
     if (v) sessionStorage.setItem(KEY_SLOT, v);
@@ -208,6 +213,24 @@ document.addEventListener("click", (e) => {
 
 $("#keybox")?.addEventListener("submit", (e) => e.preventDefault());
 
+let cfg = null;
+const fetchAll = async () => {
+  const [o, j, c, p] = await Promise.all([getJson("/api/merchant/orders"), getJson("/api/merchant/journal"), getJson("/api/merchant/cases"), rawGet("/api/products?limit=50")]);
+  return { orders: o.orders, journal: j.entries, cases: c.cases, products: p.products ?? p.items ?? [] };
+};
+async function analytics() {
+  if ($("[data-pane='analytics']").hidden) return;
+  try {
+    cfg ??= await rawGet("/api/config");
+    await showAnalytics($("#studio"), fetchAll, cfg);
+    $("#studio-note").textContent = cfg.agStudioLicense
+      ? "AG Studio over the store's own records: orders, order lines, agent call journal, DisputeDesk cases."
+      : "AG Studio without a licence key on this server (watermark).";
+  } catch (e) {
+    $("#studio-note").textContent = `Analytics unavailable: ${e.message}`;
+  }
+}
+
 function renderKeyState() {
   const b = $("#key-open");
   if (b) b.textContent = sessionStorage.getItem(KEY_SLOT) ? "Merchant key: set" : "Merchant key";
@@ -223,4 +246,5 @@ rawGet("/api/config")
 const tab = new URLSearchParams(location.search).get("tab");
 if (tab) document.querySelector(`.tabs button[data-tab="${CSS.escape(tab)}"]`)?.click();
 refresh().catch((e) => notice($("#msg"), "err", e.message));
+analytics();
 setInterval(() => refresh().catch(() => {}), 15000);

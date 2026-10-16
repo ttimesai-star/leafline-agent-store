@@ -125,3 +125,5 @@ footer.foot { text-align: center; color: var(--muted); font-size: 12px; padding:
 .keybox { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; max-width: 1280px; margin: .6rem auto 0; padding: .6rem 1rem; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }
 .keybox[hidden] { display: none; }
 .keybox input { flex: 0 1 260px; }
+.studiobar { display: flex; align-items: center; gap: .5rem; margin: 0 0 .5rem; }
+.studiobox { height: 820px; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--card); }

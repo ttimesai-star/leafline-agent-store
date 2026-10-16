@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
-    "@paypal/agent-toolkit": "1.11.0"
+    "@paypal/agent-toolkit": "1.11.0",
+    "ag-studio": "3.0.0"
   }
 }

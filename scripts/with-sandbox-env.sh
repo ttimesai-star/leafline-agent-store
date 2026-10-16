@@ -30,6 +30,15 @@ try:
         pairs["GROQ_API_KEY"] = l["groq_api_key"]
 except (OSError, ValueError):
     pass
+# AG Studio trial licence (front-end key; kept out of git, injected into the merchant page via /api/config).
+ag_file = os.environ.get("AG_SECRETS_FILE", os.path.expanduser("~/.claude/secrets/ag_grid_trial.json"))
+try:
+    keys = json.load(open(ag_file, encoding="utf-8")).get("keys", {})
+    studio = next((k["key"] for k in keys.values() if "studio" in str(k.get("product", "")).lower()), "")
+    if studio:
+        pairs["AG_STUDIO_LICENSE_KEY"] = studio
+except (OSError, ValueError):
+    pass
 for k, v in pairs.items():
     print(f"export {k}={shlex.quote(v)}")
 PY

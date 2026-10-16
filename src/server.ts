@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { join, dirname, resolve, sep } from "node:path";
 import { randomUUID, randomBytes, timingSafeEqual, createHash } from "node:crypto";
 import { execSync } from "node:child_process";
+import { gzipSync } from "node:zlib";
 import { searchProducts, priceOrder, findProduct } from "./catalog.ts";
 import { AgentJournal, validSession } from "./journal.ts";
 import { PayPalClient, PayPalError, configFromEnv, approveLink, assertOrderId } from "./paypal.ts";
@@ -36,6 +37,8 @@ export interface AppDeps {
   merchantKey?: string;
   /** Public demo: merchant panel views readable without the key (actions still need it). Agents are always refused. */
   publicMerchantView?: boolean;
+  /** AG Studio licence key (env AG_STUDIO_LICENSE_KEY); without it Studio runs with a watermark. */
+  agStudioLicense?: string;
   /** Agents may only create orders under a buyer mandate (default true). */
   requireMandate?: boolean;
   trustProxy?: boolean;
@@ -56,6 +59,19 @@ const MIME: Record<string, string> = {
 const PAGES: Record<string, string> = { "/": "index.html", "/order": "order.html", "/merchant": "merchant.html" };
 const STATIC_RE = /^\/(?:[a-z0-9_-]+\/)*[a-zA-Z0-9_.-]+\.(html|js|css|svg|png|ico|txt)$/;
 const SECURITY_HEADERS = { "x-content-type-options": "nosniff", "referrer-policy": "strict-origin-when-cross-origin" };
+
+let studioCache: { raw: Buffer; gz: Buffer } | null | undefined;
+function agStudioBundle(): { raw: Buffer; gz: Buffer } | null {
+  if (studioCache !== undefined) return studioCache;
+  try {
+    const file = join(HERE, "..", "node_modules", "ag-studio", "dist", "umd", "ag-studio.min.js");
+    const raw = readFileSync(file);
+    studioCache = { raw, gz: gzipSync(raw, { level: 9 }) };
+  } catch {
+    studioCache = null;
+  }
+  return studioCache;
+}
 
 function send(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) {
   res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...SECURITY_HEADERS, ...headers });
@@ -243,6 +259,15 @@ export function createHandler(deps: AppDeps) {
 
     try {
       // ---------- static ----------
+      // AG Studio (commercial package, npm dependency, not vendored into git): served from node_modules, gzipped once.
+      if (req.method === "GET" && path === "/vendor/ag-studio.js") {
+        const studio = agStudioBundle();
+        if (!studio) return send(res, 404, { error: "AG Studio is not installed (npm install)" });
+        const gz = /\bgzip\b/.test(String(req.headers["accept-encoding"] ?? ""));
+        res.writeHead(200, { "content-type": MIME.js, "cache-control": "public, max-age=86400", vary: "accept-encoding", ...(gz ? { "content-encoding": "gzip" } : {}), ...SECURITY_HEADERS });
+        res.end(gz ? studio.gz : studio.raw);
+        return;
+      }
       if (req.method === "GET" && (PAGES[path] || STATIC_RE.test(path))) {
         const rel = PAGES[path] ?? path.slice(1);
         const file = resolve(webDir, rel);
@@ -304,6 +329,8 @@ export function createHandler(deps: AppDeps) {
           maxBudget: (MAX_BUDGET_CENTS / 100).toFixed(2),
           version: deps.version ?? "dev",
           merchantKey: deps.merchantKey ? (deps.publicMerchantView ? "actions" : "all") : "none",
+          // AG Studio licence keys are front-end keys by design (they end up in the page either way); kept out of git.
+          agStudioLicense: deps.agStudioLicense ?? null,
         });
       }
 
@@ -615,6 +642,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
       version: gitVersion(),
       merchantKey: process.env.MERCHANT_KEY || undefined,
       publicMerchantView: process.env.PUBLIC_MERCHANT_VIEW === "1",
+      agStudioLicense: process.env.AG_STUDIO_LICENSE_KEY || undefined,
       trustProxy: process.env.TRUST_PROXY === "1" || Boolean(process.env.RENDER),
     }),
   ).listen(port, host, () => {

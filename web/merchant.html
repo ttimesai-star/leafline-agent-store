@@ -25,14 +25,19 @@
   <div class="page" style="max-width:1280px">
     <div class="kpis" id="kpis"></div>
     <div class="tabs" role="tablist">
-      <button class="on" data-tab="orders">Orders</button>
+      <button class="on" data-tab="analytics">Analytics (AG Studio)</button>
+      <button data-tab="orders">Orders</button>
       <button data-tab="journal">Agent journal</button>
       <button data-tab="cases">Disputes (DisputeDesk)</button>
       <button data-tab="toolkit">PayPal Agent Toolkit</button>
       <span class="spacer"></span>
       <button id="refresh">Refresh</button>
     </div>
-    <section data-pane="orders"><div class="gridbox" id="g-orders"></div></section>
+    <section data-pane="analytics">
+      <div class="studiobar"><span class="muted" id="studio-note">Loading AG Studio...</span><span class="spacer"></span><button id="studio-edit" type="button">Edit layout</button></div>
+      <div class="studiobox" id="studio"></div>
+    </section>
+    <section data-pane="orders" hidden><div class="gridbox" id="g-orders"></div></section>
     <section data-pane="journal" hidden><div class="gridbox" id="g-journal"></div></section>
     <section data-pane="cases" hidden>
       <div id="paypal-note"></div>
@@ -47,7 +52,7 @@
     </section>
     <div id="msg"></div>
   </div>
-  <footer class="foot">Tables: AG Grid Community (MIT). Dispute assessment: DisputeDesk rules engine. Order status, disputes and refunds: PayPal Agent Toolkit. PayPal sandbox only.</footer>
+  <footer class="foot">Analytics: AG Studio (commercial, trial licence). Tables: AG Grid Community (MIT). Dispute assessment: DisputeDesk rules engine. Order status, disputes and refunds: PayPal Agent Toolkit. PayPal sandbox only.</footer>
   <script type="module" src="/merchant.js"></script>
 </body>
 </html>
