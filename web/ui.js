@@ -52,6 +52,10 @@ export function loadPayPal(cfg, callbacks) {
     const sdk = await paypal.createInstance({ clientId: cfg.clientId, components: ["paypal-payments"], pageType: "checkout" });
     const methods = await sdk.findEligibleMethods({ currencyCode: cfg.currency ?? "USD" });
     if (!methods.isEligible("paypal")) return null;
-    return sdk.createPayPalOneTimePaymentSession(callbacks);
+    const session = sdk.createPayPalOneTimePaymentSession(callbacks);
+    // Show buttons only once the SDK has defined <paypal-button>: a click on a not-yet-upgraded element
+    // (seen in tests within ~100 ms of page load) silently opens nothing.
+    await Promise.race([customElements.whenDefined("paypal-button"), new Promise((r) => setTimeout(r, 5000))]);
+    return session;
   });
 }

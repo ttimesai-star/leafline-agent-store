@@ -18,6 +18,18 @@ pairs = {
     "PAYPAL_BUYER_EMAIL": buyer.get("email", ""),
     "PAYPAL_BUYER_PASSWORD": buyer.get("password", ""),
 }
+# Optional LLM keys for the in-page agent planner (free tiers). Missing file or keys -> rule-based planner.
+import os
+llm_file = os.environ.get("LLM_SECRETS_FILE", os.path.expanduser("~/.claude/secrets/meta_aittimes_app.json"))
+try:
+    l = json.load(open(llm_file, encoding="utf-8"))
+    if l.get("gemini_api_key_2"):
+        pairs["GEMINI_API_KEY"] = l["gemini_api_key_2"]
+        pairs["GEMINI_MODEL"] = "gemini-3-flash-preview"
+    if l.get("groq_api_key"):
+        pairs["GROQ_API_KEY"] = l["groq_api_key"]
+except (OSError, ValueError):
+    pass
 for k, v in pairs.items():
     print(f"export {k}={shlex.quote(v)}")
 PY
