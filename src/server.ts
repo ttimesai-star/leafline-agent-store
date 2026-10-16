@@ -14,17 +14,11 @@ import { MandateStore, MandateError, validMandateId, MAX_BUDGET_CENTS } from "./
 import { OrderStore, type OrderRecord } from "./orders.ts";
 import { assessStoreClaim, assessPayPalDispute, type AgentContext, type DeskCase } from "./disputedesk/desk.ts";
 import { createLlm, type Llm } from "./llm.ts";
+import { composePayments, type PaymentsPort } from "./payments.ts";
+import { ToolkitPayments } from "./toolkit.ts";
 import { validateStep, agentStep } from "./agent.ts";
 
-export interface PaymentsPort {
-  createOrder: PayPalClient["createOrder"];
-  getOrder: PayPalClient["getOrder"];
-  captureOrder: PayPalClient["captureOrder"];
-  refundCapture: PayPalClient["refundCapture"];
-  listDisputes: PayPalClient["listDisputes"];
-  getDispute: PayPalClient["getDispute"];
-  readonly clientId: string;
-}
+export type { PaymentsPort };
 
 export interface AppDeps {
   payments: PaymentsPort;
@@ -228,7 +222,7 @@ export function createHandler(deps: AppDeps) {
         return;
       }
 
-      if (req.method === "GET" && path === "/api/health") return send(res, 200, { ok: true, version: deps.version ?? "dev", sandbox: true });
+      if (req.method === "GET" && path === "/api/health") return send(res, 200, { ok: true, version: deps.version ?? "dev", sandbox: true, toolkit: deps.payments.toolkit?.version ?? null });
 
       if (req.method === "GET" && path === "/api/config") {
         return send(res, 200, {
@@ -473,6 +467,21 @@ export function createHandler(deps: AppDeps) {
         return send(res, 200, orders.resolveClaim(claim.claimId, { status: "REFUNDED", resolution: `refund ${r?.id ?? ""} ${r?.status ?? ""}`.trim(), refundId: r?.id ?? null }, now()));
       }
 
+      const ma = path.match(/^\/api\/merchant\/disputes\/(PP-[A-Z0-9-]{6,40})\/accept$/);
+      if (req.method === "POST" && ma) {
+        merchantOnly();
+        limitWrites();
+        if (!deps.payments.acceptDisputeClaim) return send(res, 501, { error: "accepting PayPal disputes needs the PayPal Agent Toolkit" });
+        const body = await readJson(req);
+        const r = await deps.payments.acceptDisputeClaim(ma[1], String(body?.note ?? "We accept the claim; PayPal refunds the buyer."));
+        disputeCache = null;
+        return send(res, 200, { disputeId: ma[1], accepted: true, links: Array.isArray(r?.links) ? r.links.length : 0, via: "@paypal/agent-toolkit accept_dispute_claim" });
+      }
+      if (req.method === "GET" && path === "/api/merchant/toolkit") {
+        const t = deps.payments.toolkit ?? null;
+        return send(res, 200, { toolkit: t, calls: deps.payments.toolkitCalls?.(Number(url.searchParams.get("limit") ?? 50)) ?? [] });
+      }
+
       if (req.method === "GET" && path === "/api/journal/stats") return send(res, 200, deps.journal.stats());
 
       return send(res, 404, { error: "not found" });
@@ -498,7 +507,10 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const port = Number(process.env.PORT ?? 8787);
   const host = process.env.HOST ?? "127.0.0.1";
   const baseUrl = (process.env.PUBLIC_URL ?? process.env.RENDER_EXTERNAL_URL ?? `http://localhost:${port}`).replace(/\/$/, "");
-  const payments = new PayPalClient(configFromEnv());
+  const cfg = configFromEnv();
+  const own = new PayPalClient(cfg);
+  // Order status, disputes and refunds go through the official PayPal Agent Toolkit (src/toolkit.ts).
+  const payments = composePayments(own, new ToolkitPayments({ token: () => own.getAccessToken(), secrets: [cfg.clientId, cfg.secret] }));
   const dataDir = join(HERE, "..", "data");
   const journal = new AgentJournal(join(dataDir, "agent_journal.jsonl"));
   const orders = new OrderStore(join(dataDir, "orders.json"));

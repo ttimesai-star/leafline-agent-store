@@ -2,12 +2,18 @@
   "name": "paypal-agent-store",
   "version": "0.0.1",
   "private": true,
-  "description": "Spike: agent-ready storefront. PayPal Orders v2 (sandbox) + WebMCP tools + per-order agent call journal.",
+  "description": "Prototype: agent-ready storefront. PayPal Orders v2 + PayPal Agent Toolkit (sandbox) + WebMCP and MCP tools + per-order agent call journal.",
   "license": "MIT",
   "type": "module",
-  "engines": { "node": ">=22.18.0" },
+  "engines": {
+    "node": ">=22.18.0"
+  },
   "scripts": {
     "start": "node src/server.ts",
     "test": "node --test \"test/*.test.ts\""
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "@paypal/agent-toolkit": "1.11.0"
   }
 }

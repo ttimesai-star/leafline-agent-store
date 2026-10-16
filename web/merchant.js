@@ -66,6 +66,14 @@ const grids = {
     ],
     { rowSelection: { mode: "singleRow", enableClickSelection: true, checkboxes: false }, onRowClicked: (e) => showCase(e.data) },
   ),
+  toolkit: makeGrid($("#g-toolkit"), [
+    { field: "at", headerName: "Time", valueFormatter: dateFmt, width: 170 },
+    { field: "tool", headerName: "Toolkit tool", width: 200 },
+    { field: "ok", headerName: "OK", width: 80, cellRenderer: (p) => pill(p.value ? "ok" : "failed", p.value ? "" : "bad") },
+    { field: "status", headerName: "HTTP", width: 90 },
+    { field: "ms", headerName: "ms", width: 90, type: "numericColumn" },
+    { field: "note", headerName: "Note", flex: 1, minWidth: 200 },
+  ]),
 };
 
 let selected = null;
@@ -77,7 +85,8 @@ function showCase(c) {
     c.source === "store" && c.status === "OPEN"
       ? `<div style="display:flex;gap:.5rem;margin-top:.6rem"><button class="primary" id="do-refund">Refund ${esc(c.amount.toFixed(2))} USD via PayPal</button><button id="do-decline">Decline</button></div>`
       : c.source === "paypal"
-        ? `<p class="muted">PayPal-side dispute: respond in the PayPal Resolution Center or with the DisputeDesk evidence actions.</p>`
+        ? `<p class="muted">PayPal-side dispute, read through the PayPal Agent Toolkit (get_dispute).</p>` +
+          (["RESOLVED", "CLOSED"].includes(c.status) ? "" : `<div style="display:flex;gap:.5rem;margin-top:.6rem"><button id="do-accept">Accept claim (Toolkit accept_dispute_claim)</button></div>`)
         : "";
   const money = (x) => `${esc(Number(x ?? 0).toFixed(2))} USD`;
   $("#case").innerHTML = `
@@ -104,12 +113,24 @@ async function act(kind) {
   }
 }
 
+async function acceptDispute() {
+  if (!selected || selected.source !== "paypal") return;
+  try {
+    await postJson(`/api/merchant/disputes/${encodeURIComponent(selected.caseId)}/accept`, { note: "We accept the claim after review." });
+    notice($("#msg"), "ok", `${selected.caseId}: claim accepted through the PayPal Agent Toolkit`);
+    await refresh();
+  } catch (e) {
+    notice($("#msg"), "err", e.message);
+  }
+}
+
 async function refresh() {
-  const [s, o, j, c] = await Promise.all([
+  const [s, o, j, c, t] = await Promise.all([
     getJson("/api/merchant/summary"),
     getJson("/api/merchant/orders"),
     getJson("/api/merchant/journal"),
     getJson("/api/merchant/cases"),
+    getJson("/api/merchant/toolkit").catch(() => ({ toolkit: null, calls: [] })),
   ]);
   const share = s.orders ? Math.round((s.agentOrders / s.orders) * 100) : 0;
   const k = (v, l) => `<div class="kpi"><div class="v">${esc(v)}</div><div class="l">${esc(l)}</div></div>`;
@@ -125,6 +146,10 @@ async function refresh() {
   grids.orders.setGridOption("rowData", o.orders);
   grids.journal.setGridOption("rowData", j.entries);
   grids.cases.setGridOption("rowData", c.cases);
+  grids.toolkit.setGridOption("rowData", t.calls);
+  $("#toolkit-note").textContent = t.toolkit
+    ? `${t.toolkit.package} ${t.toolkit.version}. Enabled tools (allow-list enforced by this server): ${t.toolkit.tools.join(", ")}. Orders are created and captured by the store's own Orders v2 client.`
+    : "PayPal Agent Toolkit is not wired in on this server.";
   $("#paypal-note").innerHTML = c.paypalError ? `<div class="notice err">${esc(c.paypalError)}</div>` : "";
   if (selected) {
     const again = c.cases.find((x) => x.caseId === selected.caseId);
@@ -141,6 +166,7 @@ document.addEventListener("click", (e) => {
   } else if (t.id === "refresh") refresh();
   else if (t.id === "do-refund") act("refund");
   else if (t.id === "do-decline") act("decline");
+  else if (t.id === "do-accept") acceptDispute();
 });
 
 const tab = new URLSearchParams(location.search).get("tab");
