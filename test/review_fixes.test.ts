@@ -56,7 +56,12 @@ before(async () => {
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
-after(() => server.close());
+after(async () => {
+  await new Promise<void>((r) => {
+    server.closeAllConnections();
+    server.close(() => r());
+  });
+});
 
 const post = (p: string, body: unknown, headers: Record<string, string> = {}) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
 

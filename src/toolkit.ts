@@ -176,12 +176,29 @@ export class ToolkitPayments {
 
 /** Toolkit 1.11.0 error shapes: LlmError.toJSON() = {ok:false,status,code,message}; generic = {error:{message}}. */
 export function toolkitError(out: any): { status?: number; code?: string; message: string } | null {
-  if (out && typeof out === "object" && out.ok === false) {
+  if (out === null || out === undefined) return { message: "empty Toolkit result" };
+  if (typeof out !== "object") return null;
+  if (out.ok === false) {
     return { status: Number.isFinite(out.status) ? Number(out.status) : undefined, code: typeof out.code === "string" ? out.code : undefined, message: String(out.message ?? "error").slice(0, 200) };
   }
-  if (out && typeof out === "object" && out.error && typeof out.error === "object" && !Array.isArray(out.error)) {
+  if (typeof out.error === "string") {
+    return { message: String(out.error_description ?? out.error).slice(0, 200) };
+  }
+  if (out.error && typeof out.error === "object" && !Array.isArray(out.error)) {
     return { message: String(out.error.message ?? "error").slice(0, 200) };
   }
-  if (out === null || out === undefined) return { message: "empty Toolkit result" };
+  if (typeof out.error_description === "string") {
+    return { message: out.error_description.slice(0, 200) };
+  }
+  if (typeof out.name === "string" && typeof out.message === "string" && (out.details || out.debug_id || /^[A-Z0-9_]{3,}$/.test(out.name))) {
+    return { status: Number.isFinite(out.status) ? Number(out.status) : undefined, code: out.name, message: String(out.message).slice(0, 200) };
+  }
+  if (Array.isArray(out.errors) && out.errors.length > 0 && out.errors[0]) {
+    const first = out.errors[0];
+    return { message: String(first?.message ?? first ?? "error").slice(0, 200) };
+  }
+  if ((out.status === "FAILURE" || out.status === "FAILED") && !out.id) {
+    return { message: String(out.message ?? "Toolkit call failed").slice(0, 200) };
+  }
   return null;
 }

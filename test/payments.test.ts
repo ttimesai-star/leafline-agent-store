@@ -60,7 +60,12 @@ before(async () => {
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
-after(() => server.close());
+after(async () => {
+  await new Promise<void>((r) => {
+    server.closeAllConnections();
+    server.close(() => r());
+  });
+});
 
 const post = (p: string, body: unknown, headers: Record<string, string> = {}) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
 
@@ -100,7 +105,7 @@ test("accepting a PayPal dispute is merchant-only and goes through accept_disput
 test("health and merchant Toolkit log show the Toolkit and its calls, no payloads", async () => {
   const h = await (await fetch(`${base}/api/health`)).json();
   assert.equal(h.toolkit, "1.11.0");
-  const t = await (await fetch(`${base}/api/merchant/toolkit`)).json();
+  const t = await (await fetch(`${base}/api/merchant/toolkit`, { headers: { "x-merchant-key": "MK" } })).json();
   assert.equal(t.toolkit.package, "@paypal/agent-toolkit");
   assert.equal(t.toolkit.tools.length, 6);
   const tools = new Set(t.calls.map((c: any) => c.tool));

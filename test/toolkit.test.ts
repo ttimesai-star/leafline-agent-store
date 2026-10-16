@@ -89,11 +89,14 @@ test("thrown errors are redacted", async () => {
   await assert.rejects(() => tp.getRefund("REFUND00001"), (e: any) => e instanceof PayPalError && !/SECRETVALUE|abc\.def/.test(e.message));
 });
 
-test("toolkitError recognises both Toolkit error shapes and passes normal results", () => {
+test("toolkitError recognises Toolkit error shapes, PayPal REST errors, and passes normal results", () => {
   assert.deepEqual(toolkitError({ ok: false, status: 422, code: "X", message: "m" }), { status: 422, code: "X", message: "m" });
   assert.deepEqual(toolkitError({ error: { message: "e" } }), { message: "e" });
+  assert.deepEqual(toolkitError({ error: "invalid_token", error_description: "Access token is invalid" }), { message: "Access token is invalid" });
+  assert.deepEqual(toolkitError({ name: "UNPROCESSABLE_ENTITY", message: "The capture has already been refunded." }), { status: undefined, code: "UNPROCESSABLE_ENTITY", message: "The capture has already been refunded." });
+  assert.deepEqual(toolkitError({ errors: [{ message: "First error" }] }), { message: "First error" });
+  assert.deepEqual(toolkitError({ status: "FAILURE", message: "Call failed" }), { message: "Call failed" });
   assert.equal(toolkitError({ id: "X", status: "COMPLETED" }), null);
-  assert.equal(toolkitError({ error: "invalid_token" }), null, "string error fields are not Toolkit errors");
   assert.ok(toolkitError(null));
 });
 

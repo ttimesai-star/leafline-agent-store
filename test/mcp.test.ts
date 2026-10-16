@@ -48,7 +48,12 @@ before(async () => {
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
-after(() => server.close());
+after(async () => {
+  await new Promise<void>((r) => {
+    server.closeAllConnections();
+    server.close(() => r());
+  });
+});
 
 const mandate = async (body: unknown) => (await (await fetch(`${base}/api/mandates`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })).json()) as any;
 const payload = (r: any) => JSON.parse(r.content[0].text);

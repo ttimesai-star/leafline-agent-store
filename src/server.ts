@@ -261,12 +261,21 @@ export function createHandler(deps: AppDeps) {
         const inner = `http://${local.includes(":") ? `[${local}]` : local}:${req.socket.localPort}`;
         const mcp = createStoreMcpServer({ base: inner, session: mcpSessionFor(req.headers["x-agent-session"], mandate), mandate, headers: { "x-internal-mcp": internalKey, "x-mcp-client-ip": ip } });
         const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
-        res.on("close", () => {
+        let closed = false;
+        const cleanup = () => {
+          if (closed) return;
+          closed = true;
           transport.close().catch(() => {});
           mcp.close().catch(() => {});
-        });
-        await mcp.connect(transport);
-        await transport.handleRequest(req, res, body);
+        };
+        res.on("finish", cleanup);
+        res.on("close", cleanup);
+        try {
+          await mcp.connect(transport);
+          await transport.handleRequest(req, res, body);
+        } finally {
+          cleanup();
+        }
         return;
       }
 
@@ -519,8 +528,9 @@ export function createHandler(deps: AppDeps) {
         inFlightRefunds.add(claim.claimId);
         try {
           const r = await deps.payments.refundCapture(o.captureId, { note: `Refund for order ${o.orderId} (${claim.claimId})` }, `refund-${claim.claimId}`);
-          orders.addRefund(o.orderId, { refundId: String(r?.id ?? ""), amount: String(r?.amount?.value ?? o.total), status: String(r?.status ?? ""), at: now().toISOString(), claimId: claim.claimId });
-          return send(res, 200, orders.resolveClaim(claim.claimId, { status: "REFUNDED", resolution: `refund ${r?.id ?? ""} ${r?.status ?? ""}`.trim(), refundId: r?.id ?? null }, now()));
+          if (!r?.id || typeof r.id !== "string") throw new PayPalError("PayPal refund failed", 0, undefined, "refund did not return a refund ID");
+          orders.addRefund(o.orderId, { refundId: String(r.id), amount: String(r?.amount?.value ?? o.total), status: String(r?.status ?? ""), at: now().toISOString(), claimId: claim.claimId });
+          return send(res, 200, orders.resolveClaim(claim.claimId, { status: "REFUNDED", resolution: `refund ${r.id} ${r?.status ?? ""}`.trim(), refundId: r.id }, now()));
         } finally {
           inFlightRefunds.delete(claim.claimId);
         }
@@ -537,6 +547,7 @@ export function createHandler(deps: AppDeps) {
         return send(res, 200, { disputeId: ma[1], accepted: true, links: Array.isArray(r?.links) ? r.links.length : 0, via: "@paypal/agent-toolkit accept_dispute_claim" });
       }
       if (req.method === "GET" && path === "/api/merchant/toolkit") {
+        merchantOnly();
         const t = deps.payments.toolkit ?? null;
         return send(res, 200, { toolkit: t, calls: deps.payments.toolkitCalls?.(Number(url.searchParams.get("limit") ?? 50)) ?? [] });
       }

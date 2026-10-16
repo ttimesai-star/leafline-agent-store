@@ -63,7 +63,12 @@ before(async () => {
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
-after(() => server.close());
+after(async () => {
+  await new Promise<void>((r) => {
+    server.closeAllConnections();
+    server.close(() => r());
+  });
+});
 
 const post = (p: string, body: unknown, headers: Record<string, string> = {}) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
 const agentHeaders = (session: string, mandate?: string) => ({ "x-agent-tool": "t", "x-agent-session": session, ...(mandate ? { "x-agent-mandate": mandate } : {}) });
@@ -204,7 +209,10 @@ test("order records are rebuilt from PayPal after a restart", async () => {
   const v = await (await fetch(`${b}/api/orders/TESTORDER001`)).json();
   assert.equal(v.status, "COMPLETED");
   assert.equal(v.channel, "human");
-  srv.close();
+  await new Promise<void>((r) => {
+    srv.closeAllConnections();
+    srv.close(() => r());
+  });
 });
 
 test("agent step endpoint without LLM tells the page to fall back", async () => {
@@ -229,4 +237,41 @@ test("a reloaded PayPal return URL does not capture twice", async () => {
   assert.equal(r.status, 302);
   assert.match(r.headers.get("location") ?? "", /status=COMPLETED/);
   assert.equal(calls.filter((x) => x === `capture ${o.orderId}`).length, 1);
+});
+
+test("merchant toolkit endpoint enforces merchantOnly check", async () => {
+  const agentRes = await fetch(`${base}/api/merchant/toolkit`, { headers: agentHeaders("ag_test0001") });
+  assert.equal(agentRes.status, 403);
+  const humanRes = await fetch(`${base}/api/merchant/toolkit`);
+  assert.equal(humanRes.status, 200);
+});
+
+test("refund failure without refund ID throws PayPalError and does not resolve claim", async () => {
+  const failPayments = {
+    ...fakePayments,
+    async refundCapture() {
+      return { status: "FAILED" }; // missing id
+    },
+  };
+  const srvHandler = createHandler({ payments: failPayments as any, journal: new AgentJournal(), orders: new OrderStore(), mandates: new MandateStore(), baseUrl: "http://x" });
+  const srv = createServer(srvHandler);
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", () => r()));
+  const srvBase = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+
+  try {
+    const oRes = await fetch(`${srvBase}/api/orders`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ items: [{ sku: "TEA-SENCHA-80", quantity: 1 }] }) });
+    const o = await oRes.json();
+    await fetch(`${srvBase}/api/orders/${o.orderId}/capture`, { method: "POST" });
+    const cRes = await fetch(`${srvBase}/api/orders/${o.orderId}/claims`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "REFUND_REQUEST", reason: "OTHER", note: "test refund fail" }) });
+    const c = await cRes.json();
+
+    const rRes = await fetch(`${srvBase}/api/merchant/claims/${c.claimId}/refund`, { method: "POST" });
+    assert.equal(rRes.status, 502);
+    assert.match((await rRes.json()).error, /refund did not return a refund ID/);
+  } finally {
+    await new Promise<void>((r) => {
+      srv.closeAllConnections();
+      srv.close(() => r());
+    });
+  }
 });
