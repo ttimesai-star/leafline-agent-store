@@ -79,10 +79,11 @@ function showCase(c) {
       : c.source === "paypal"
         ? `<p class="muted">PayPal-side dispute: respond in the PayPal Resolution Center or with the DisputeDesk evidence actions.</p>`
         : "";
+  const money = (x) => `${esc(Number(x ?? 0).toFixed(2))} USD`;
   $("#case").innerHTML = `
     <h2>${esc(c.caseId)} <small>${esc(c.kind.replace("_", " ").toLowerCase())}, order ${esc(c.orderId ?? "-")}</small></h2>
     <div class="rec ${esc(a.recommendation)}">${esc(a.recommendation)} <span class="muted">win estimate ${Math.round(a.winProbability * 100)}%</span></div>
-    <p class="muted">Expected if fought: ${esc(a.expected.fight)} USD; if accepted now: ${esc(a.expected.accept)} USD (assumed fee ${esc(a.expected.assumedFee)}).</p>
+    <p class="muted">Expected if fought: ${money(a.expected.fight)}; if accepted now: ${money(a.expected.accept)} (assumed fee ${money(a.expected.assumedFee)}).</p>
     ${c.note ? `<div class="ev"><b>Buyer message</b>${esc(c.note)}</div>` : ""}
     <ul>${a.rationale.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>
     ${a.riskFlags.length ? `<p><b>Risks:</b> ${esc(a.riskFlags.join("; "))}</p>` : ""}

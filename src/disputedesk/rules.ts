@@ -1,4 +1,5 @@
 // Vendored from DisputeDesk (github.com/ttimesai-star/disputedesk, MIT, same author) - keep in sync by hand.
+// Local change: sign-symmetric money rounding; fmt() uses the same rounding as `expected` (was -24.17 vs -24.18).
 import type { AcceptClaimType, Evidence } from "./types.ts";
 import type { Assessment, CaseFacts, Recommendation } from "./shared.ts";
 import { humanReason } from "./reasons.ts";
@@ -181,9 +182,12 @@ function pickAcceptType(f: CaseFacts): AcceptClaimType | null {
 function clamp01(x: number): number {
   return Math.min(0.99, Math.max(0.01, x));
 }
-function round2(x: number): number {
-  return Math.round(x * 100) / 100;
+export function round2(x: number): number {
+  // Half away from zero on the absolute value, so -24.175 and 24.175 round to the same magnitude.
+  // The epsilon absorbs binary noise such as 24.175 * 100 = 2417.4999999999995.
+  return (Math.sign(x) * Math.round(Math.abs(x) * 100 + 1e-9)) / 100;
 }
 function fmt(x: number, ccy: string): string {
-  return `${x < 0 ? "-" : ""}${Math.abs(x).toFixed(2)} ${ccy}`;
+  const r = round2(x);
+  return `${r < 0 ? "-" : ""}${Math.abs(r).toFixed(2)} ${ccy}`;
 }

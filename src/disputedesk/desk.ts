@@ -83,7 +83,11 @@ export function agentEvidence(order: OrderRecord, ctx: AgentContext, reason: str
   ].filter(Boolean) as string[];
   const evidence: Evidence[] = [{ evidence_type: "OTHER", notes: lines.join(" ") }];
   if (reason === "MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED") {
-    const shown = searches.flatMap((s) => (Array.isArray(s.result) ? (s.result as any[]) : [])).filter((r) => order.items.some((i) => i.sku === r?.sku));
+    const seen = new Set<string>();
+    // One line per ordered SKU (the agent may have searched several times and seen the same product again).
+    const shown = searches
+      .flatMap((s) => (Array.isArray(s.result) ? (s.result as any[]) : []))
+      .filter((r) => order.items.some((i) => i.sku === r?.sku) && !seen.has(r.sku) && Boolean(seen.add(r.sku)));
     if (shown.length) {
       evidence.push({ evidence_type: "ITEM_DESCRIPTION", notes: `Product data the agent was shown before ordering: ${shown.slice(0, 3).map((r) => `${r.sku} "${r.description ?? r.name}" at ${r.price} USD`).join("; ")}.` });
     }
