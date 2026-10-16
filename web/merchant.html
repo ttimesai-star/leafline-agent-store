@@ -14,8 +14,14 @@
     <span class="tagline">Merchant panel: orders, agent journal, disputes</span>
     <span class="spacer"></span>
     <span class="badge warn"><span class="dot"></span>PayPal sandbox</span>
+    <button id="key-open" type="button">Merchant key</button>
     <a href="/">Store</a>
   </header>
+  <form class="keybox" id="keybox" hidden>
+    <span id="key-why" class="muted"></span>
+    <input id="key-in" type="password" autocomplete="off" placeholder="merchant key" aria-label="Merchant key">
+    <button id="key-save" class="primary" type="submit">Use key</button>
+  </form>
   <div class="page" style="max-width:1280px">
     <div class="kpis" id="kpis"></div>
     <div class="tabs" role="tablist">

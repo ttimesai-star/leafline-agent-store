@@ -122,3 +122,6 @@ footer.foot { text-align: center; color: var(--muted); font-size: 12px; padding:
 .ev { background: #fafaf8; border: 1px solid var(--line); border-radius: 8px; padding: .5rem .6rem; margin: .4rem 0; font-size: 13px; }
 .ev b { font: 600 11px ui-monospace, monospace; color: var(--muted); display: block; }
 .ev.agent { border-color: #cfe3d6; background: var(--brand-2); }
+.keybox { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; max-width: 1280px; margin: .6rem auto 0; padding: .6rem 1rem; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }
+.keybox[hidden] { display: none; }
+.keybox input { flex: 0 1 260px; }

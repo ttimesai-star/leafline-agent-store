@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join, dirname, resolve, sep } from "node:path";
-import { randomUUID, randomBytes, timingSafeEqual } from "node:crypto";
+import { randomUUID, randomBytes, timingSafeEqual, createHash } from "node:crypto";
 import { execSync } from "node:child_process";
 import { searchProducts, priceOrder, findProduct } from "./catalog.ts";
 import { AgentJournal, validSession } from "./journal.ts";
@@ -31,8 +31,10 @@ export interface AppDeps {
   baseUrl: string;
   webDir?: string;
   version?: string;
-  /** If set, merchant actions (refund / decline) need header X-Merchant-Key. */
+  /** If set, merchant actions (refund / decline / accept) need header X-Merchant-Key; so do merchant reads unless publicMerchantView. */
   merchantKey?: string;
+  /** Public demo: merchant panel views readable without the key (actions still need it). Agents are always refused. */
+  publicMerchantView?: boolean;
   /** Agents may only create orders under a buyer mandate (default true). */
   requireMandate?: boolean;
   trustProxy?: boolean;
@@ -226,7 +228,13 @@ export function createHandler(deps: AppDeps) {
     };
     const merchantOnly = () => {
       if (claimsAgent) throw httpError(403, "merchant actions are not available to agents");
-      if (deps.merchantKey && req.headers["x-merchant-key"] !== deps.merchantKey) throw httpError(401, "merchant key required");
+      if (deps.merchantKey && !keyMatches(req.headers["x-merchant-key"], deps.merchantKey)) throw httpError(401, "merchant key required");
+    };
+    // Merchant views (orders of all buyers, agent journal, cases, Toolkit log): never for agents; the key is needed
+    // too unless the deployment is a public demo (PUBLIC_MERCHANT_VIEW=1).
+    const merchantRead = () => {
+      if (claimsAgent) throw httpError(403, "merchant views are not available to agents");
+      if (deps.merchantKey && !deps.publicMerchantView && !keyMatches(req.headers["x-merchant-key"], deps.merchantKey)) throw httpError(401, "merchant key required");
     };
     const limitWrites = () => {
       if (!writeLimiter.allow(ip)) throw httpError(429, "too many requests, slow down");
@@ -294,6 +302,7 @@ export function createHandler(deps: AppDeps) {
           llm: Boolean(deps.llm),
           maxBudget: (MAX_BUDGET_CENTS / 100).toFixed(2),
           version: deps.version ?? "dev",
+          merchantKey: deps.merchantKey ? (deps.publicMerchantView ? "actions" : "all") : "none",
         });
       }
 
@@ -466,6 +475,7 @@ export function createHandler(deps: AppDeps) {
       }
 
       // ---------- merchant ----------
+      if (req.method === "GET" && path.startsWith("/api/merchant/")) merchantRead();
       if (req.method === "GET" && path === "/api/merchant/orders") return send(res, 200, { orders: orders.listOrders() });
       if (req.method === "GET" && path === "/api/merchant/journal") return send(res, 200, { entries: deps.journal.list(Number(url.searchParams.get("limit") ?? 500)) });
       if (req.method === "GET" && path === "/api/merchant/summary") {
@@ -547,7 +557,6 @@ export function createHandler(deps: AppDeps) {
         return send(res, 200, { disputeId: ma[1], accepted: true, links: Array.isArray(r?.links) ? r.links.length : 0, via: "@paypal/agent-toolkit accept_dispute_claim" });
       }
       if (req.method === "GET" && path === "/api/merchant/toolkit") {
-        merchantOnly();
         const t = deps.payments.toolkit ?? null;
         return send(res, 200, { toolkit: t, calls: deps.payments.toolkitCalls?.(Number(url.searchParams.get("limit") ?? 50)) ?? [] });
       }
@@ -562,6 +571,14 @@ export function createHandler(deps: AppDeps) {
       return send(res, status, { error: msg, code: e instanceof MandateError ? e.code : undefined, debugId: e instanceof PayPalError ? e.debugId : undefined });
     }
   };
+}
+
+/** Constant-time comparison of the X-Merchant-Key header with the configured key. */
+function keyMatches(got: unknown, want: string): boolean {
+  if (typeof got !== "string") return false;
+  const a = createHash("sha256").update(got).digest();
+  const b = createHash("sha256").update(want).digest();
+  return timingSafeEqual(a, b);
 }
 
 function gitVersion(): string {
@@ -593,6 +610,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
       baseUrl,
       version: gitVersion(),
       merchantKey: process.env.MERCHANT_KEY || undefined,
+      publicMerchantView: process.env.PUBLIC_MERCHANT_VIEW === "1",
       trustProxy: process.env.TRUST_PROXY === "1" || Boolean(process.env.RENDER),
     }),
   ).listen(port, host, () => {

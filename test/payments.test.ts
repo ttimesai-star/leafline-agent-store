@@ -86,7 +86,8 @@ test("order -> capture on own client; status, claim refund and disputes through 
   assert.equal(refundRun.requestId, `refund-${claim.claimId}`);
   assert.match(refundRun.arg.capture_id, /^CAP/);
 
-  const cases = await (await fetch(`${base}/api/merchant/cases?refresh=1`)).json();
+  assert.equal((await fetch(`${base}/api/merchant/cases`)).status, 401, "merchant views need the key when MERCHANT_KEY is set");
+  const cases = await (await fetch(`${base}/api/merchant/cases?refresh=1`, { headers: { "x-merchant-key": "MK" } })).json();
   assert.ok(cases.cases.some((c: any) => c.caseId === "PP-D-777777"));
   assert.equal(cases.paypalError, null);
 });

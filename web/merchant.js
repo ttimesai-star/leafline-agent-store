@@ -1,4 +1,32 @@
-import { $, esc, notice, getJson, postJson } from "./ui.js";
+import { $, esc, notice, getJson as rawGet, postJson as rawPost } from "./ui.js";
+
+// Merchant key (server env MERCHANT_KEY). Taken from the URL fragment (#key=..., never sent to the server or its
+// logs) or typed into the header field; kept for this tab only (sessionStorage) and sent as X-Merchant-Key.
+const KEY_SLOT = "merchantKey";
+{
+  const m = location.hash.match(/(?:^#|&)key=([^&]+)/);
+  if (m) {
+    sessionStorage.setItem(KEY_SLOT, decodeURIComponent(m[1]));
+    history.replaceState(null, "", location.pathname + location.search);
+  }
+}
+const keyHeaders = () => {
+  const k = sessionStorage.getItem(KEY_SLOT);
+  return k ? { "x-merchant-key": k } : {};
+};
+const askKey = (why) => {
+  const box = $("#keybox");
+  if (!box) return;
+  box.hidden = false;
+  $("#key-why").textContent = why;
+  $("#key-in").focus();
+};
+const onAuth = (e) => {
+  if (e?.status === 401) askKey("This server needs the merchant key (MERCHANT_KEY).");
+  throw e;
+};
+const getJson = (url) => rawGet(url, { headers: keyHeaders() }).catch(onAuth);
+const postJson = (url, body) => rawPost(url, body, keyHeaders()).catch(onAuth);
 
 const ag = window.agGrid;
 if (ag.ModuleRegistry && ag.AllCommunityModule) ag.ModuleRegistry.registerModules([ag.AllCommunityModule]);
@@ -164,10 +192,33 @@ document.addEventListener("click", (e) => {
     document.querySelectorAll(".tabs button[data-tab]").forEach((b) => b.classList.toggle("on", b === t));
     document.querySelectorAll("[data-pane]").forEach((p) => (p.hidden = p.dataset.pane !== t.dataset.tab));
   } else if (t.id === "refresh") refresh();
+  else if (t.id === "key-save") {
+    const v = $("#key-in").value.trim();
+    if (v) sessionStorage.setItem(KEY_SLOT, v);
+    else sessionStorage.removeItem(KEY_SLOT);
+    $("#key-in").value = "";
+    $("#keybox").hidden = true;
+    renderKeyState();
+    refresh().catch((e) => notice($("#msg"), "err", e.message));
+  } else if (t.id === "key-open") askKey("Merchant actions (refund, decline, accept a PayPal dispute) are signed with this key.");
   else if (t.id === "do-refund") act("refund");
   else if (t.id === "do-decline") act("decline");
   else if (t.id === "do-accept") acceptDispute();
 });
+
+$("#keybox")?.addEventListener("submit", (e) => e.preventDefault());
+
+function renderKeyState() {
+  const b = $("#key-open");
+  if (b) b.textContent = sessionStorage.getItem(KEY_SLOT) ? "Merchant key: set" : "Merchant key";
+}
+renderKeyState();
+rawGet("/api/config")
+  .then((c) => {
+    if (c.merchantKey === "all" && !sessionStorage.getItem(KEY_SLOT)) askKey("This server keeps the merchant panel behind the merchant key.");
+    if (c.merchantKey === "none" && $("#key-open")) $("#key-open").hidden = true;
+  })
+  .catch(() => {});
 
 const tab = new URLSearchParams(location.search).get("tab");
 if (tab) document.querySelector(`.tabs button[data-tab="${CSS.escape(tab)}"]`)?.click();

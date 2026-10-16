@@ -14,7 +14,7 @@ Steps (each prints PASS/FAIL with a short reason, screenshots go to data/e2e/):
   mcp    - an external agent (official MCP SDK client, scripts/mcp_client.ts) connects to {url}/mcp with a buyer
            mandate, orders within it, the buyer approves the approveUrl in PayPal, the order is COMPLETED; an
            over-budget order from the same agent is refused by the store.
-Reads PAYPAL_BUYER_EMAIL / PAYPAL_BUYER_PASSWORD from env; never prints them.
+Reads PAYPAL_BUYER_EMAIL / PAYPAL_BUYER_PASSWORD (and MERCHANT_KEY when the server has one) from env; never prints them.
 """
 import json
 import os
@@ -23,7 +23,7 @@ import subprocess
 import sys
 import time
 import urllib.request
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
 
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
@@ -33,6 +33,10 @@ ONLY = ARGS[ARGS.index("--only") + 1] if "--only" in ARGS else None
 SHOTS = os.path.join(os.path.dirname(__file__), "..", "data", "e2e")
 EMAIL = os.environ.get("PAYPAL_BUYER_EMAIL", "")
 PASSWORD = os.environ.get("PAYPAL_BUYER_PASSWORD", "")
+# Server started with MERCHANT_KEY: the panel gets it through the URL fragment (never sent to the server),
+# direct API reads send it as X-Merchant-Key.
+MERCHANT_KEY = os.environ.get("MERCHANT_KEY", "")
+KEY_FRAG = f"#key={quote(MERCHANT_KEY, safe='')}" if MERCHANT_KEY else ""
 results = []
 
 
@@ -219,7 +223,7 @@ def claims(page, oid):
     page.locator("#c-send").click()
     page.wait_for_selector("#claims .notice", timeout=20000)
     log("buyer opened a claim", "OPEN" in page.locator("#claims").inner_text(), page.locator("#claims").inner_text()[:80])
-    page.goto(URL + "/merchant?tab=cases", wait_until="networkidle")
+    page.goto(URL + "/merchant?tab=cases" + KEY_FRAG, wait_until="networkidle")
     page.wait_for_selector("#g-cases .ag-row", timeout=30000)
     page.locator("#g-cases .ag-row").first.click()
     page.wait_for_selector("#case .rec", timeout=10000)
@@ -231,7 +235,8 @@ def claims(page, oid):
         page.wait_for_selector("#msg .notice", timeout=60000)
         msg = page.locator("#msg").inner_text()
         log("merchant refund via PayPal", "REFUNDED" in msg, msg[:100])
-    kit = json.loads(urllib.request.urlopen(URL + "/api/merchant/toolkit", timeout=30).read())
+    kit_req = urllib.request.Request(URL + "/api/merchant/toolkit", headers={"x-merchant-key": MERCHANT_KEY} if MERCHANT_KEY else {})
+    kit = json.loads(urllib.request.urlopen(kit_req, timeout=30).read())
     refunds = [c for c in kit.get("calls", []) if c.get("tool") == "create_refund"]
     log("refund issued through PayPal Agent Toolkit", bool(refunds) and refunds[0].get("ok") is True,
         f"{(kit.get('toolkit') or {}).get('package')} {(kit.get('toolkit') or {}).get('version')}, create_refund ok={refunds[0].get('ok') if refunds else None}")

@@ -26,7 +26,7 @@ export async function getJson(url, opts) {
   return d;
 }
 
-export const postJson = (url, body) => getJson(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body ?? {}) });
+export const postJson = (url, body, headers = {}) => getJson(url, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body ?? {}) });
 
 export function when(iso) {
   if (!iso) return "";
