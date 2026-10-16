@@ -1,7 +1,7 @@
 """Browser end-to-end check against a running store (local or deployed), PayPal SANDBOX only.
 
 Usage: scripts/with-sandbox-env.sh python scripts/e2e_browser.py [--url http://localhost:8787] [--headed]
-         [--only human|agent|claims] [--flags]
+         [--only human|agent|claims|mcp] [--flags]
 
 Steps (each prints PASS/FAIL with a short reason, screenshots go to data/e2e/):
   human  - add two products to the cart, pay with the PayPal JS SDK v6 button (popup), sandbox buyer approves,
@@ -10,14 +10,19 @@ Steps (each prints PASS/FAIL with a short reason, screenshots go to data/e2e/):
            buyer approves it with the PayPal button, order page shows COMPLETED with the agent receipt; then an
            over-budget agent order is refused.
   claims - on the agent order page the buyer reports a problem; merchant panel shows the DisputeDesk case with
-           agent evidence; merchant refunds through PayPal (sandbox refund) -> REFUNDED.
+           agent evidence; merchant refunds through PayPal (sandbox refund via the PayPal Agent Toolkit) -> REFUNDED.
+  mcp    - an external agent (official MCP SDK client, scripts/mcp_client.ts) connects to {url}/mcp with a buyer
+           mandate, orders within it, the buyer approves the approveUrl in PayPal, the order is COMPLETED; an
+           over-budget order from the same agent is refused by the store.
 Reads PAYPAL_BUYER_EMAIL / PAYPAL_BUYER_PASSWORD from env; never prints them.
 """
 import json
 import os
 import re
+import subprocess
 import sys
 import time
+import urllib.request
 from urllib.parse import urlparse
 
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
@@ -47,12 +52,20 @@ PAY_BTN = (
     "button:has-text('Pay Now'), button:has-text('Continue to Review Order'), button:has-text('Continue')"
 )
 # Which screen the PayPal popup shows right now: login email, password, review (pay button) or the sandbox error page.
+# Visibility is judged by the rendered box: on the split login page PayPal keeps #password in the layout
+# (offsetParent set) while only the email step is on screen, and an empty visible email field wins.
 STATE_JS = """() => {
-  const vis = (el) => el && el.offsetParent !== null;
+  const vis = (el) => {
+    if (!el || el.offsetParent === null) return false;
+    const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && Number(cs.opacity) > 0;
+  };
   if (/Things don.t appear to be working/i.test(document.body?.innerText || '')) return 'error';
   if ([...document.querySelectorAll('button')].some(b => vis(b) && /Complete Purchase|Pay Now|Continue/.test(b.textContent))) return 'pay';
-  if (vis(document.querySelector('#password'))) return 'password';
-  if (vis(document.querySelector('#email'))) return 'email';
+  const email = document.querySelector('#email');
+  if (vis(email) && !email.value) return 'email';
+  if (vis(document.querySelector('#password')) && vis(document.querySelector('#btnLogin'))) return 'password';
+  if (vis(email)) return 'email';
   return '';
 }"""
 
@@ -218,12 +231,55 @@ def claims(page, oid):
         page.wait_for_selector("#msg .notice", timeout=60000)
         msg = page.locator("#msg").inner_text()
         log("merchant refund via PayPal", "REFUNDED" in msg, msg[:100])
+    kit = json.loads(urllib.request.urlopen(URL + "/api/merchant/toolkit", timeout=30).read())
+    refunds = [c for c in kit.get("calls", []) if c.get("tool") == "create_refund"]
+    log("refund issued through PayPal Agent Toolkit", bool(refunds) and refunds[0].get("ok") is True,
+        f"{(kit.get('toolkit') or {}).get('package')} {(kit.get('toolkit') or {}).get('version')}, create_refund ok={refunds[0].get('ok') if refunds else None}")
+    page.locator(".tabs button[data-tab='toolkit']").click()
+    page.wait_for_timeout(500)
+    shot(page, "09_merchant_toolkit")
     page.locator(".tabs button[data-tab='orders']").click()
     page.wait_for_timeout(500)
     shot(page, "07_merchant_orders")
     page.locator(".tabs button[data-tab='journal']").click()
     page.wait_for_timeout(500)
     shot(page, "08_merchant_journal")
+
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def mcp_call(mandate, *args):
+    out = subprocess.run(["node", os.path.join(HERE, "mcp_client.ts"), "--url", URL, "--mandate", mandate, *args],
+                         capture_output=True, text=True, timeout=120)
+    if out.returncode != 0:
+        raise RuntimeError(f"mcp_client failed: {out.stderr.strip()[:200]}")
+    return json.loads(out.stdout.strip().splitlines()[-1])
+
+
+def mcp(page):
+    req = urllib.request.Request(URL + "/api/mandates", data=json.dumps({"budget": 20, "per_order_max": 15}).encode(),
+                                 headers={"content-type": "application/json"}, method="POST")
+    mandate = json.loads(urllib.request.urlopen(req, timeout=30).read())["mandateId"]
+    tools = mcp_call(mandate, "tools")["tools"]
+    log("external MCP agent sees the store tools", len(tools) == 6, ",".join(tools))
+    budget = mcp_call(mandate, "call", "get_budget", "{}")["result"]
+    order = mcp_call(mandate, "call", "create_order", json.dumps({"items": [{"sku": "TEA-SENCHA-80", "quantity": 1}]}))
+    res = order["result"]
+    ok = not order["isError"] and res.get("approveUrl", "").startswith("https://www.sandbox.paypal.com/")
+    log("MCP agent order inside the mandate", ok, f"budget {budget.get('remaining')} -> order {res.get('orderId')} {res.get('total')}, remaining {(res.get('mandate') or {}).get('remaining')}")
+    if not ok:
+        return
+    page.goto(res["approveUrl"], wait_until="domcontentloaded")
+    approve_in_popup(page)
+    page.wait_for_url(re.compile(r"/order\?id="), timeout=90000)
+    page.wait_for_selector("#summary .status", timeout=30000)
+    page.wait_for_timeout(800)
+    shot(page, "10_mcp_order")
+    status = mcp_call(mandate, "call", "get_order_status", json.dumps({"order_id": res["orderId"]}))["result"]
+    log("buyer approved MCP agent order in PayPal, captured", status.get("status") == "COMPLETED", f"order {res['orderId']} {status.get('status')} capture {status.get('captureId')}")
+    over = mcp_call(mandate, "call", "create_order", json.dumps({"items": [{"sku": "TEA-OOLONG-100", "quantity": 1}]}))
+    log("over-budget MCP agent order refused", over["isError"] and over["result"].get("code") == "OVER_BUDGET", str(over["result"])[:120])
 
 
 def main():
@@ -246,6 +302,8 @@ def main():
                 oid = agent(page)
             if ONLY in (None, "claims") and oid:
                 claims(page, oid)
+            if ONLY in (None, "mcp"):
+                mcp(page)
         except (PWTimeout, RuntimeError) as e:
             log("unexpected", False, str(e).splitlines()[0][:200])
             try:
