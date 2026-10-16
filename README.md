@@ -105,7 +105,7 @@ node scripts/mcp_client.ts --url http://localhost:8787 --mandate md_... call cre
   `dashboard_execute_query` answering allowed vs refused agent calls by tool. Second run with the LLM planner
   (Gemini 3 Flash); the first fell back to rules (free-tier quota), which led to the multi-key chain.
 - Merchant key on: the same claims flow with `MERCHANT_KEY` set passes 8/8 (panel sends `X-Merchant-Key`).
-- Unit, HTTP and MCP-client tests: **79/79** (`npm test`), including the official MCP SDK client over Streamable
+- Unit, HTTP and MCP-client tests: **84/84** (`npm test`), including the official MCP SDK client over Streamable
   HTTP and over stdio (child process): order inside the mandate; over-budget, per-order, category, revoked and
   no-mandate refusals.
 - Live sandbox, 16.10.2026, Chrome 155 with the WebMCP flag, `scripts/e2e_browser.py`: **15/15**, twice — human
@@ -127,7 +127,19 @@ MCP-B polyfill (`@mcp-b/global`, MIT) provides the same surface.
 
 ## Reviews
 
-Independent code review by Google Jules (sessions 1877010590083434047, 11669279245805133758, 4709167192530215068).
+Independent code review by Google Jules (sessions 1877010590083434047, 11669279245805133758, 4709167192530215068,
+1039657886568469323). From 1039657886568469323, all taken: the rate limiter no longer clears every key when it
+passes 10 000 entries (that let a flood of spoofed IPs reset blocked clients), LLM error bodies are masked for
+every provider key, `/api/journal/stats` is a merchant view, atomic journal writes with a Windows-safe rename
+fallback, the seed never overwrites an existing journal, `--export-seed` only with `--apply`.
+Second reviewer from another vendor (Kimi K2.6, Moonshot) on the security-relevant diff: taken - env limits are
+parsed so a typo cannot turn a global ceiling off (`n <= NaN` is always false), overlapping provider keys are
+masked longest first; not taken - "hashing in keyMatches leaks the key length": the secret is hashed in the same
+time on every request, and the suggested early length check would itself reveal the length (a 512-byte cap on
+the header was added). Semgrep (p/javascript, p/typescript, p/nodejsscan, p/secrets): 8 warnings reviewed - six
+regex-DoS hits are anchored, bounded character classes; the `innerHTML` hit escapes every value; the
+`Math.random` run id became `crypto.randomUUID`. gitleaks over the full history: no leaks.
+
 From 4709167192530215068, all taken: PayPal REST error bodies recognised as Toolkit errors, a refund without a
 refund id is an error (claim stays open), `/mcp` transport closed once on every path, Toolkit log merchant-only.
 Earlier, taken: fail-closed

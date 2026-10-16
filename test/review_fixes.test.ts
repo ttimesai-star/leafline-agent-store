@@ -226,3 +226,16 @@ test("askDashboard handles errors in WebMCP responses safely", async () => {
   );
   delete (globalThis as any).__dashboardTools;
 });
+
+test("second review (Kimi K2.6): env limits never become NaN; overlapping keys are masked whole", async () => {
+  const { envLimit } = await import("../src/server.ts");
+  assert.equal(envLimit("1,000", 300), 1);
+  assert.equal(envLimit("abc", 300), 300);
+  assert.equal(envLimit("0", 300), 300);
+  assert.equal(envLimit(undefined, 300), 300);
+  assert.equal(envLimit("60", 300), 60);
+  const short = "KEYABCDEF";
+  const long = "KEYABCDEF123456789";
+  const llm = createLlm({ GEMINI_API_KEY: `${short},${long}` } as any, (async () => new Response(`bad ${long} and ${short}`, { status: 400 })) as any)!;
+  await assert.rejects(() => llm.chat([{ role: "user", content: "x" }]), (e: any) => !e.message.includes("123456789") && !e.message.includes("KEYABCDEF"));
+});

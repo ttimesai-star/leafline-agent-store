@@ -181,10 +181,10 @@ export function createHandler(deps: AppDeps) {
   const now = deps.now ?? (() => new Date());
   const requireMandate = deps.requireMandate ?? true;
   const writeLimiter = new RateLimiter(60, 10 * 60_000);
-  const writeGlobal = new RateLimiter(Number(process.env.WRITES_PER_10MIN ?? 1000), 10 * 60_000);
+  const writeGlobal = new RateLimiter(envLimit(process.env.WRITES_PER_10MIN, 1000), 10 * 60_000);
   const llmLimiter = new RateLimiter(60, 10 * 60_000);
   // Whole-server ceiling on LLM steps: bounds spend on the (free-tier) LLM keys even if per-IP keys are spoofed.
-  const llmGlobal = new RateLimiter(Number(process.env.LLM_STEPS_PER_10MIN ?? 300), 10 * 60_000);
+  const llmGlobal = new RateLimiter(envLimit(process.env.LLM_STEPS_PER_10MIN, 300), 10 * 60_000);
   const mcpLimiter = new RateLimiter(300, 10 * 60_000);
   // The /mcp endpoint calls this same API over loopback; this per-process key lets those inner calls carry the
   // outer client's IP for rate limiting (nobody else can set it).
@@ -635,9 +635,18 @@ export function createHandler(deps: AppDeps) {
   };
 }
 
-/** Constant-time comparison of the X-Merchant-Key header with the configured key. */
+/** A positive integer from env, else the default (a typo must not switch a limit off: n <= NaN is always false). */
+export function envLimit(v: string | undefined, def: number): number {
+  const n = Number.parseInt(String(v ?? ""), 10);
+  return Number.isFinite(n) && n > 0 ? n : def;
+}
+
+/**
+ * Constant-time comparison of the X-Merchant-Key header with the configured key. Both sides are hashed to equal
+ * length first, so neither the comparison nor an early length check reveals the key length.
+ */
 function keyMatches(got: unknown, want: string): boolean {
-  if (typeof got !== "string") return false;
+  if (typeof got !== "string" || got.length > 512) return false;
   const a = createHash("sha256").update(got).digest();
   const b = createHash("sha256").update(want).digest();
   return timingSafeEqual(a, b);

@@ -85,9 +85,9 @@ export class OpenAiCompatibleLlm implements Llm {
     if (!res.ok) {
       let detail = (await res.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 200);
       // Some providers echo the request (and key) in error bodies; strip keys before anything reaches a log.
-      for (const prov of this.providers) {
-        if (prov.apiKey) detail = detail.split(prov.apiKey).join("***");
-      }
+      // Longest key first, so a key that is a substring of another cannot leave part of the longer one visible.
+      const keys = this.providers.map((x) => x.apiKey).filter((k) => k && k.length >= 6).sort((a, b) => b.length - a.length);
+      for (const k of keys) detail = detail.split(k).join("***");
       detail = detail
         .replace(/AIza[0-9A-Za-z_-]{20,}/g, "AIza***")
         .replace(/AQ\.[0-9A-Za-z_.-]{20,}/g, "AQ.***")
@@ -123,7 +123,12 @@ export function createLlm(env: NodeJS.ProcessEnv = process.env, fetchImpl: typeo
   if (env.GROQ_API_KEY && env.GROQ_MODEL) {
     providers.push({ name: "groq", baseUrl: "https://api.groq.com/openai/v1", apiKey: env.GROQ_API_KEY, model: env.GROQ_MODEL });
   }
-  return providers.length > 0 ? new OpenAiCompatibleLlm(providers, Number(env.LLM_TIMEOUT_MS ?? 20_000), fetchImpl) : null;
+  return providers.length > 0 ? new OpenAiCompatibleLlm(providers, positiveInt(env.LLM_TIMEOUT_MS, 20_000), fetchImpl) : null;
+}
+
+function positiveInt(v: string | undefined, def: number): number {
+  const n = Number.parseInt(String(v ?? ""), 10);
+  return Number.isFinite(n) && n > 0 ? n : def;
 }
 
 /** Extracts the first JSON object from a model reply (handles ```json fences and chatter). */
