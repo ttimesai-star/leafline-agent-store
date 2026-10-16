@@ -1,5 +1,6 @@
 import { $, esc, notice, getJson as rawGet, postJson as rawPost } from "./ui.js";
 import { showAnalytics, toggleEdit } from "./analytics.js";
+import { askDashboard } from "./studio_webmcp.js";
 
 // Merchant key (server env MERCHANT_KEY). Taken from the URL fragment (#key=..., never sent to the server or its
 // logs) or typed into the header field; kept for this tab only (sessionStorage) and sent as X-Merchant-Key.
@@ -193,6 +194,14 @@ document.addEventListener("click", (e) => {
     document.querySelectorAll(".tabs button[data-tab]").forEach((b) => b.classList.toggle("on", b === t));
     document.querySelectorAll("[data-pane]").forEach((p) => (p.hidden = p.dataset.pane !== t.dataset.tab));
     if (t.dataset.tab === "analytics") analytics();
+  } else if (t.id === "studio-ask") {
+    askDashboard()
+      .then(({ via, rows }) => {
+        const head = "<tr><th>tool</th><th>allowed</th><th>refused</th></tr>";
+        const body = rows.map((r) => `<tr><td>${esc(r.tool)}</td><td>${esc(r.allowed)}</td><td>${esc(r.refused)}</td></tr>`).join("");
+        $("#studio-answer").innerHTML = `<div class="panel answer"><b>dashboard_execute_query</b> <span class="muted">"allowed vs refused agent calls by tool", called via ${esc(via)}</span><table>${head}${body}</table></div>`;
+      })
+      .catch((e) => notice($("#studio-answer"), "err", e.message));
   } else if (t.id === "studio-edit") {
     const mode = toggleEdit();
     if (mode) t.textContent = mode === "edit" ? "Back to view" : "Edit layout";
@@ -224,6 +233,7 @@ async function analytics() {
     cfg ??= await rawGet("/api/config");
     await showAnalytics($("#studio"), fetchAll, cfg, (r) => {
       const n = r.tools?.length ?? 0;
+      $("#studio-ask").hidden = n === 0;
       $("#studio-mcp").textContent = r.ok
         ? `WebMCP: ${n} read-only dashboard tools published for the browser's agent (${r.tools.join(", ")}).`
         : n

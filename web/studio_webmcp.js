@@ -57,3 +57,41 @@ export async function publishDashboardTools(studioApi) {
   const res = await registerStoreTools(findModelContext(), tools);
   return { ...res, tools: tools.map((x) => x.name) };
 }
+
+/** The question the panel's "Ask the dashboard" button sends: allowed vs refused agent calls by tool. */
+export const SAMPLE_QUERY = {
+  query: {
+    variant: "aggregation",
+    kind: "apiQuery",
+    axes: [{ dimensions: [{ field: { id: "calls.tool" }, as: "tool" }] }],
+    measures: [
+      { field: { id: "calls.allowed", aggregation: "sum" }, as: "allowed" },
+      { field: { id: "calls.refused", aggregation: "sum" }, as: "refused" },
+    ],
+  },
+};
+
+/**
+ * Run dashboard_execute_query the way an external browser agent would: through document.modelContext.executeTool
+ * when the browser has WebMCP, otherwise through the same tool object. Returns { via, rows }.
+ */
+export async function askDashboard(args = SAMPLE_QUERY) {
+  const mc = findModelContext();
+  let raw;
+  let via;
+  if (mc && typeof mc.executeTool === "function" && typeof mc.getTools === "function") {
+    const t = (await mc.getTools()).find((x) => x.name === "dashboard_execute_query");
+    if (!t) throw new Error("dashboard_execute_query is not registered");
+    raw = await mc.executeTool(t, args);
+    via = "document.modelContext.executeTool (WebMCP)";
+  } else {
+    const t = (globalThis.__dashboardTools ?? []).find((x) => x.name === "dashboard_execute_query");
+    if (!t) throw new Error("dashboard tools are not ready");
+    raw = await t.execute(args);
+    via = "the same tool object (this browser has no WebMCP)";
+  }
+  const obj = typeof raw === "string" ? JSON.parse(raw) : raw;
+  const payload = JSON.parse(obj?.content?.[0]?.text ?? "{}");
+  if (obj?.isError) throw new Error(payload.error ?? "query failed");
+  return { via, rows: payload?.data?.result ?? [] };
+}
