@@ -35,6 +35,7 @@ header.top { display: flex; align-items: center; gap: 1rem; padding: .9rem 1.5re
 .badge.warn { background: var(--warn-bg); color: var(--warn); border-color: #f1d9ad; }
 .badge.bad { background: var(--bad-bg); color: var(--bad); border-color: #f2c4c2; }
 .badge .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.ag-cell .badge { line-height: 1.4; vertical-align: middle; }
 
 main.shop { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 1.25rem; padding: 1.25rem 1.5rem 3rem; max-width: 1280px; margin: 0 auto; }
 @media (max-width: 960px) { main.shop { grid-template-columns: 1fr; } }

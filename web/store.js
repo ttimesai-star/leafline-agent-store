@@ -294,6 +294,14 @@ document.addEventListener("click", (e) => {
 $("#cart-pay").addEventListener("click", () => {
   notice($("#cart-msg"), "", "");
   startPayment(createCartOrder().then((d) => ({ orderId: d.orderId })));
+  // The sandbox SDK occasionally opens no window on click; offer the redirect flow instead of a dead button.
+  setTimeout(() => {
+    const alt = $("#cart-pay-redirect");
+    if (state.cart.length && location.pathname === "/") {
+      alt.textContent = "Popup did not open? Pay on PayPal (redirect)";
+      alt.hidden = false;
+    }
+  }, 4000);
 });
 $("#agent-pay").addEventListener("click", () => startPayment(Promise.resolve({ orderId: state.agentOrderId })));
 $("#search").addEventListener("input", () => renderProducts());

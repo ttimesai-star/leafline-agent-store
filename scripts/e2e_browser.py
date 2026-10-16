@@ -67,9 +67,11 @@ def approve_in_popup(popup):
     if "sandbox.paypal.com" not in host:
         raise RuntimeError(f"popup is not the PayPal sandbox: {host}")
     errors_seen = 0
+    trace = []
     for _ in range(10):
         popup.wait_for_function(f"() => ({STATE_JS})() !== ''", timeout=60000)
         state = popup.evaluate(STATE_JS)
+        trace.append(state)
         try:
             if state == "error":
                 errors_seen += 1
@@ -92,10 +94,11 @@ def approve_in_popup(popup):
                 popup.wait_for_timeout(1500)
                 popup.locator(PAY_BTN).first.click(timeout=15000)
                 return
-        except PWTimeout:
+        except PWTimeout as e:
             # The page moved on under us (e.g. turned into the error page); re-read the state.
+            trace.append("timeout:" + str(e).splitlines()[0][:60])
             popup.wait_for_timeout(1000)
-    raise RuntimeError("PayPal popup did not reach the pay button in 10 steps")
+    raise RuntimeError("PayPal popup did not reach the pay button in 10 steps: " + " > ".join(trace))
 
 
 def open_popup(page, selector, name):
