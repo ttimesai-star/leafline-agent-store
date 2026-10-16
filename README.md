@@ -25,3 +25,9 @@ WebMCP (verified 2026-10-16, Chrome 155): native API is `document.modelContext` 
 MCP-B polyfill (`@mcp-b/global`, MIT) provides the same surface.
 
 License: MIT.
+
+## Sandbox end-to-end (16.10.2026)
+With US sandbox accounts (Business + Personal) and a Merchant app on the US Business account, the full cycle works:
+create order -> buyer approval (`scripts/sandbox_approve.py`) -> capture -> `COMPLETED`
+(order `28Y33417NX865202K`, capture `6LC221476A3697515`, USD 3.00). Accounts created with country BY could not complete payments.
+Credentials are read from `~/.claude/secrets/paypal_sandbox.json` by `scripts/with-sandbox-env.sh` (never committed).

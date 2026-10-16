@@ -8,7 +8,7 @@ import os
 import sys
 from urllib.parse import urlparse
 
-from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+from playwright.sync_api import sync_playwright, Error as PWError, TimeoutError as PWTimeout
 
 SHOT_DIR = os.environ.get("SPIKE_SHOT_DIR", "data")
 
@@ -55,7 +55,15 @@ def main() -> int:
             page.wait_for_timeout(1500)
             btn.click()
             log("approve clicked")
-            page.wait_for_url(lambda s: "localhost" in s or "paypal/return" in s, timeout=60000)
+            try:
+                page.wait_for_url(lambda s: "localhost" in s or "paypal/return" in s, timeout=60000)
+            except PWError as e:
+                # Return URL points at a local server that may not be running: connection refused
+                # AFTER the redirect still means PayPal approved the order. Verify via GET order.
+                if "ERR_CONNECTION_REFUSED" not in str(e):
+                    raise
+                log("return URL refused (server not running) - approval done on PayPal side")
+                return 0
             fu = urlparse(page.url)
             log(f"redirected to {fu.hostname}{fu.path}")
             return 0
