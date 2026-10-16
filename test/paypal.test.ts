@@ -102,3 +102,10 @@ test("network failure message is redacted", async () => {
   const pp = new PayPalClient({ clientId: CID, secret: SEC, fetchImpl: fn });
   await assert.rejects(pp.getAccessToken(), (e: Error) => !e.message.includes(SEC) && !e.message.includes(CID));
 });
+
+test("concurrent calls share one OAuth token request", async () => {
+  const f = fakeFetch([tokenOk, () => json(200, { id: "O1", status: "CREATED" }), () => json(200, { id: "O2", status: "CREATED" })]);
+  const c = new PayPalClient({ clientId: CID, secret: SEC, fetchImpl: f.fn });
+  await Promise.all([c.getOrder("ORDER0000001"), c.getOrder("ORDER0000002")]);
+  assert.equal(f.calls.filter((x) => x.url.endsWith("/v1/oauth2/token")).length, 1);
+});

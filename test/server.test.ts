@@ -221,3 +221,12 @@ test("helpers", () => {
   const leaked = maskKeys("gemini LLM HTTP 400 url ?key=AIzaSyA1234567890abcdefghijk&x=1 Bearer abc.def gsk_abcdefghijklmnopqrstuvwxyz AQ.Ab8RN6abcdefghijklmnopqrstuv");
   for (const s of ["AIzaSyA1234567890", "abc.def", "gsk_abcdefghij", "AQ.Ab8RN6abc"]) assert.ok(!leaked.includes(s), s);
 });
+
+test("a reloaded PayPal return URL does not capture twice", async () => {
+  const o = await (await post("/api/orders", { items: [{ sku: "TEA-SENCHA-80", quantity: 1 }], flow: "redirect" })).json();
+  await fetch(`${base}/paypal/return?token=${o.orderId}`, { redirect: "manual" });
+  const r = await fetch(`${base}/paypal/return?token=${o.orderId}`, { redirect: "manual" });
+  assert.equal(r.status, 302);
+  assert.match(r.headers.get("location") ?? "", /status=COMPLETED/);
+  assert.equal(calls.filter((x) => x === `capture ${o.orderId}`).length, 1);
+});

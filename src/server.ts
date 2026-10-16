@@ -174,6 +174,8 @@ export function createHandler(deps: AppDeps) {
 
   async function capture(id: string) {
     const rec = await loadOrder(id);
+    // Already captured (PayPal return URL reloaded, onApprove + return both fired): read, do not capture again.
+    if (rec.status === "COMPLETED" && rec.captureId) return orderView(await deps.payments.getOrder(id));
     const raw = await deps.payments.captureOrder(id, `cap-${id}`);
     const v = orderView(raw);
     orders.updateOrder(id, {

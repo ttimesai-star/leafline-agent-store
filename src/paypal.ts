@@ -95,8 +95,18 @@ export class PayPalClient {
     return redact(text, [this.cfg.clientId, this.cfg.secret, this.token?.value]);
   }
 
+  private tokenInFlight: Promise<string> | null = null;
+
   async getAccessToken(now: number = Date.now()): Promise<string> {
     if (this.token && this.token.expiresAt - 60_000 > now) return this.token.value;
+    // Concurrent requests share one OAuth call instead of each fetching its own token.
+    this.tokenInFlight ??= this.fetchToken(now).finally(() => {
+      this.tokenInFlight = null;
+    });
+    return this.tokenInFlight;
+  }
+
+  private async fetchToken(now: number): Promise<string> {
     const basic = Buffer.from(`${this.cfg.clientId}:${this.cfg.secret}`).toString("base64");
     let res: Response;
     try {
