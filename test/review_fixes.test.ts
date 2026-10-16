@@ -127,3 +127,102 @@ test("client IP behind the proxy prefers Cloudflare's header over a client-suppl
   assert.equal(clientIpBehindProxy({ "x-forwarded-for": "198.51.100.2, 10.0.0.1" }), "198.51.100.2");
   assert.equal(clientIpBehindProxy({}), "");
 });
+
+test("GET /api/journal/stats requires merchantRead authorization", async () => {
+  const secretKey = "mKeySecret123";
+  const handler = createHandler({
+    payments: payments as any,
+    journal: new AgentJournal(),
+    orders: new OrderStore(),
+    mandates: new MandateStore(),
+    baseUrl: "http://x",
+    merchantKey: secretKey,
+    publicMerchantView: false,
+  });
+  const s = createServer(handler);
+  await new Promise<void>((r) => s.listen(0, "127.0.0.1", () => r()));
+  const port = (s.address() as AddressInfo).port;
+  try {
+    const unauth = await fetch(`http://127.0.0.1:${port}/api/journal/stats`);
+    assert.equal(unauth.status, 401);
+
+    const agentReq = await fetch(`http://127.0.0.1:${port}/api/journal/stats`, {
+      headers: { "x-agent-tool": "search_products", "x-agent-session": "ag_sess00001", "x-merchant-key": secretKey },
+    });
+    assert.equal(agentReq.status, 403);
+
+    const authed = await fetch(`http://127.0.0.1:${port}/api/journal/stats`, {
+      headers: { "x-merchant-key": secretKey },
+    });
+    assert.equal(authed.status, 200);
+  } finally {
+    s.close();
+  }
+});
+
+test("RateLimiter purges expired entries without clearing active blocked keys", async () => {
+  const { RateLimiter } = await import("../src/server.ts");
+  const limiter = new RateLimiter(2, 60_000);
+  const now = 1000;
+
+  assert.equal(limiter.allow("blocked-ip", now), true);
+  assert.equal(limiter.allow("blocked-ip", now), true);
+  assert.equal(limiter.allow("blocked-ip", now), false); // rate limited
+
+  // Flood 10,005 expired entries
+  for (let i = 0; i < 10005; i++) {
+    limiter.allow(`expired-key-${i}`, now - 100_000);
+  }
+
+  // Check that "blocked-ip" is STILL rate-limited and was not flushed by hits.clear()
+  assert.equal(limiter.allow("blocked-ip", now), false);
+});
+
+test("seedIfEmpty does not overwrite existing agent_journal.jsonl", async () => {
+  const { seedIfEmpty } = await import("../src/demo_data.ts");
+  const { mkdtempSync, rmSync, writeFileSync, readFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+
+  const dataDir = mkdtempSync(join(tmpdir(), "data-test-"));
+  const seedDir = mkdtempSync(join(tmpdir(), "seed-test-"));
+
+  try {
+    writeFileSync(join(seedDir, "orders.json"), JSON.stringify({ orders: [{ orderId: "SEED1" }] }));
+    writeFileSync(join(seedDir, "agent_journal.jsonl"), '{"session":"seed_sess"}\n');
+
+    // Existing journal in dataDir
+    const existingJournalContent = '{"session":"existing_sess"}\n';
+    writeFileSync(join(dataDir, "agent_journal.jsonl"), existingJournalContent);
+
+    const seededCount = seedIfEmpty(dataDir, seedDir);
+    assert.equal(seededCount, 1);
+
+    // orders.json was copied
+    assert.equal(readFileSync(join(dataDir, "orders.json"), "utf8").includes("SEED1"), true);
+    // agent_journal.jsonl was NOT overwritten
+    assert.equal(readFileSync(join(dataDir, "agent_journal.jsonl"), "utf8"), existingJournalContent);
+  } finally {
+    rmSync(dataDir, { recursive: true, force: true });
+    rmSync(seedDir, { recursive: true, force: true });
+  }
+});
+
+test("askDashboard handles errors in WebMCP responses safely", async () => {
+  const { askDashboard } = await import("../web/studio_webmcp.js");
+
+  (globalThis as any).__dashboardTools = [
+    {
+      name: "dashboard_execute_query",
+      async execute() {
+        return { content: [{ type: "text", text: JSON.stringify({ error: "Dashboard engine error" }) }] };
+      },
+    },
+  ];
+
+  await assert.rejects(
+    () => askDashboard(),
+    (err: any) => err.message === "Dashboard engine error",
+  );
+  delete (globalThis as any).__dashboardTools;
+});

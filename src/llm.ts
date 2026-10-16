@@ -84,8 +84,17 @@ export class OpenAiCompatibleLlm implements Llm {
     });
     if (!res.ok) {
       let detail = (await res.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 200);
-      // Some providers echo the request (and key) in error bodies; strip it before it reaches any log.
-      if (p.apiKey && p.apiKey.length >= 6) detail = detail.split(p.apiKey).join("***");
+      // Some providers echo the request (and key) in error bodies; strip keys before anything reaches a log.
+      for (const prov of this.providers) {
+        if (prov.apiKey) detail = detail.split(prov.apiKey).join("***");
+      }
+      detail = detail
+        .replace(/AIza[0-9A-Za-z_-]{20,}/g, "AIza***")
+        .replace(/AQ\.[0-9A-Za-z_.-]{20,}/g, "AQ.***")
+        .replace(/gsk_[0-9A-Za-z]{20,}/g, "gsk_***")
+        .replace(/sk-[0-9A-Za-z_-]{20,}/g, "sk-***")
+        .replace(/Bearer\s+[A-Za-z0-9._-]+/g, "Bearer ***")
+        .replace(/([?&]key=)[^&\s]+/g, "$1***");
       throw new Error(`${p.name} LLM HTTP ${res.status}: ${detail}`);
     }
     const data = (await res.json()) as { choices?: { message?: { content?: string | null; tool_calls?: ToolCall[] } }[] };

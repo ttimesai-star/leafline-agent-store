@@ -120,7 +120,7 @@ function showCase(c) {
         : "";
   const money = (x) => `${esc(Number(x ?? 0).toFixed(2))} USD`;
   $("#case").innerHTML = `
-    <h2>${esc(c.caseId)} <small>${esc(c.kind.replace("_", " ").toLowerCase())}, order ${esc(c.orderId ?? "-")}</small></h2>
+    <h2>${esc(c.caseId)} <small>${esc(c.kind.replace(/_/g, " ").toLowerCase())}, order ${esc(c.orderId ?? "-")}</small></h2>
     <div class="rec ${esc(a.recommendation)}">${esc(a.recommendation)} <span class="muted">win estimate ${Math.round(a.winProbability * 100)}%</span></div>
     <p class="muted">Expected if fought: ${money(a.expected.fight)}; if accepted now: ${money(a.expected.accept)} (assumed fee ${money(a.expected.assumedFee)}).</p>
     ${c.note ? `<div class="ev"><b>Buyer message</b>${esc(c.note)}</div>` : ""}

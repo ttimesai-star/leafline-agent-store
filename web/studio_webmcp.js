@@ -91,7 +91,12 @@ export async function askDashboard(args = SAMPLE_QUERY) {
     via = "the same tool object (this browser has no WebMCP)";
   }
   const obj = typeof raw === "string" ? JSON.parse(raw) : raw;
-  const payload = JSON.parse(obj?.content?.[0]?.text ?? "{}");
-  if (obj?.isError) throw new Error(payload.error ?? "query failed");
+  let payload = {};
+  try {
+    payload = JSON.parse(obj?.content?.[0]?.text ?? "{}");
+  } catch {
+    payload = {};
+  }
+  if (obj?.isError || payload?.error) throw new Error(payload?.error ?? "query failed");
   return { via, rows: payload?.data?.result ?? [] };
 }

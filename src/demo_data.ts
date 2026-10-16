@@ -2,7 +2,7 @@
 // data/agent_journal.jsonl. Browser E2E runs leave many abandoned orders (created, never approved) behind;
 // before recording a demo they are filtered out, and the remaining real sandbox orders can be exported as a
 // seed for a fresh deployment (Render's disk is empty after every deploy / restart).
-import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync, renameSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync, renameSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import type { OrderRecord, ClaimRecord } from "./orders.ts";
 import type { JournalEntry } from "./journal.ts";
@@ -59,12 +59,28 @@ export function readDemoData(dir: string): DemoData {
   return { orders: book.orders ?? [], claims: book.claims ?? [], journal };
 }
 
+function safeReplaceFileSync(tmp: string, target: string) {
+  try {
+    renameSync(tmp, target);
+  } catch (e: any) {
+    if (e?.code === "EXDEV" || e?.code === "EPERM" || e?.code === "EBUSY" || e?.code === "EEXIST") {
+      copyFileSync(tmp, target);
+      try { unlinkSync(tmp); } catch {}
+    } else {
+      throw e;
+    }
+  }
+}
+
 export function writeDemoData(dir: string, d: DemoData): void {
   mkdirSync(dir, { recursive: true });
   const of = join(dir, ORDERS_FILE);
+  const jf = join(dir, JOURNAL_FILE);
   writeFileSync(of + ".tmp", JSON.stringify({ orders: d.orders, claims: d.claims }));
-  renameSync(of + ".tmp", of);
-  writeFileSync(join(dir, JOURNAL_FILE), d.journal.map((e) => JSON.stringify(e)).join("\n") + (d.journal.length ? "\n" : ""));
+  safeReplaceFileSync(of + ".tmp", of);
+  const jContent = d.journal.map((e) => JSON.stringify(e)).join("\n") + (d.journal.length ? "\n" : "");
+  writeFileSync(jf + ".tmp", jContent);
+  safeReplaceFileSync(jf + ".tmp", jf);
 }
 
 /**
@@ -75,7 +91,11 @@ export function seedIfEmpty(dataDir: string, seedDir: string | undefined): numbe
   if (!seedDir || existsSync(join(dataDir, ORDERS_FILE)) || !existsSync(join(seedDir, ORDERS_FILE))) return 0;
   mkdirSync(dataDir, { recursive: true });
   copyFileSync(join(seedDir, ORDERS_FILE), join(dataDir, ORDERS_FILE));
-  if (existsSync(join(seedDir, JOURNAL_FILE))) copyFileSync(join(seedDir, JOURNAL_FILE), join(dataDir, JOURNAL_FILE));
+  const targetJournal = join(dataDir, JOURNAL_FILE);
+  const seedJournal = join(seedDir, JOURNAL_FILE);
+  if (!existsSync(targetJournal) && existsSync(seedJournal)) {
+    copyFileSync(seedJournal, targetJournal);
+  }
   try {
     return (JSON.parse(readFileSync(join(dataDir, ORDERS_FILE), "utf8")).orders ?? []).length;
   } catch {

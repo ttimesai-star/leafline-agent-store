@@ -145,7 +145,25 @@ export class RateLimiter {
     this.windowMs = windowMs;
   }
   allow(key: string, now = Date.now()): boolean {
-    if (this.hits.size > 10_000) this.hits.clear();
+    if (this.hits.size > 10_000) {
+      for (const [k, v] of this.hits.entries()) {
+        if (v.reset <= now) this.hits.delete(k);
+      }
+      if (this.hits.size > 10_000) {
+        for (const [k, v] of this.hits.entries()) {
+          if (v.n <= this.limit) {
+            this.hits.delete(k);
+            if (this.hits.size <= 10_000) break;
+          }
+        }
+        if (this.hits.size > 10_000) {
+          for (const k of this.hits.keys()) {
+            this.hits.delete(k);
+            if (this.hits.size <= 10_000) break;
+          }
+        }
+      }
+    }
     const h = this.hits.get(key);
     if (!h || h.reset <= now) {
       this.hits.set(key, { n: 1, reset: now + this.windowMs });
@@ -602,7 +620,10 @@ export function createHandler(deps: AppDeps) {
         return send(res, 200, { toolkit: t, calls: deps.payments.toolkitCalls?.(Number(url.searchParams.get("limit") ?? 50)) ?? [] });
       }
 
-      if (req.method === "GET" && path === "/api/journal/stats") return send(res, 200, deps.journal.stats());
+      if (req.method === "GET" && path === "/api/journal/stats") {
+        merchantRead();
+        return send(res, 200, deps.journal.stats());
+      }
 
       return send(res, 404, { error: "not found" });
     } catch (e: any) {
@@ -639,7 +660,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const own = new PayPalClient(cfg);
   // Order status, disputes and refunds go through the official PayPal Agent Toolkit (src/toolkit.ts).
   const payments = composePayments(own, new ToolkitPayments({ token: () => own.getAccessToken(), secrets: [cfg.clientId, cfg.secret] }));
-  const dataDir = resolve(process.env.DATA_DIR ?? join(HERE, "..", "data"));
+  const dataDir = resolve(HERE, "..", process.env.DATA_DIR ?? "data");
   // Fresh deployment (empty disk): start from the exported sandbox orders, if a seed is configured.
   const seeded = seedIfEmpty(dataDir, process.env.DEMO_SEED_DIR ? resolve(HERE, "..", process.env.DEMO_SEED_DIR) : undefined);
   if (seeded) console.log(`seeded ${seeded} sandbox orders from ${process.env.DEMO_SEED_DIR}`);
