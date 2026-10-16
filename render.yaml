@@ -1,0 +1,34 @@
+# Render blueprint for the public sandbox demo. Secrets are set in the Render dashboard / API (sync: false),
+# never here. Free plan: the disk is empty after each deploy or restart, so DEMO_SEED_DIR loads the exported
+# sandbox orders (demo/seed) when the data directory is empty.
+services:
+  - type: web
+    name: leafline-agent-store
+    runtime: node
+    plan: free
+    branch: main
+    buildCommand: npm ci --omit=dev
+    startCommand: node src/server.ts
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: PAYPAL_API_BASE
+        value: https://api-m.sandbox.paypal.com
+      - key: PUBLIC_MERCHANT_VIEW
+        value: "1"
+      - key: DEMO_SEED_DIR
+        value: demo/seed
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: MERCHANT_KEY
+        sync: false
+      - key: AG_STUDIO_LICENSE_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false

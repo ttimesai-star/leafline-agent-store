@@ -119,3 +119,11 @@ test("LLM provider error bodies never carry the API key", async () => {
   const llm = createLlm({ GEMINI_API_KEY: key } as any, (async () => new Response(`{"error":"bad key ${key}"}`, { status: 400 })) as any)!;
   await assert.rejects(() => llm.chat([{ role: "user", content: "x" }]), (e: any) => !String(e.message).includes(key));
 });
+
+test("client IP behind the proxy prefers Cloudflare's header over a client-supplied X-Forwarded-For", async () => {
+  const { clientIpBehindProxy } = await import("../src/server.ts");
+  assert.equal(clientIpBehindProxy({ "x-forwarded-for": "6.6.6.6, 10.0.0.1", "cf-connecting-ip": "203.0.113.7" }), "203.0.113.7");
+  assert.equal(clientIpBehindProxy({ "x-forwarded-for": "6.6.6.6, 10.0.0.1", "true-client-ip": "203.0.113.8" }), "203.0.113.8");
+  assert.equal(clientIpBehindProxy({ "x-forwarded-for": "198.51.100.2, 10.0.0.1" }), "198.51.100.2");
+  assert.equal(clientIpBehindProxy({}), "");
+});

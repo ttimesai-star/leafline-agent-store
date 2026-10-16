@@ -126,6 +126,16 @@ export function maskEmail(e: unknown): string | null {
 }
 
 /** Fixed-window limiter per key. Small and in-memory: enough for a public sandbox demo. */
+/**
+ * Client IP behind a trusted proxy. Render sits behind Cloudflare, which overwrites CF-Connecting-IP with the real
+ * client address; the leftmost X-Forwarded-For entry is whatever the client sent, so it is only the last resort
+ * (global limits bound the damage if it is spoofed).
+ */
+export function clientIpBehindProxy(h: Record<string, string | string[] | undefined>): string {
+  const one = (v: unknown) => String(Array.isArray(v) ? v[0] : (v ?? "")).trim().slice(0, 64);
+  return one(h["cf-connecting-ip"]) || one(h["true-client-ip"]) || one(String(h["x-forwarded-for"] ?? "").split(",")[0]);
+}
+
 export class RateLimiter {
   private hits = new Map<string, { n: number; reset: number }>();
   limit: number;
@@ -153,7 +163,10 @@ export function createHandler(deps: AppDeps) {
   const now = deps.now ?? (() => new Date());
   const requireMandate = deps.requireMandate ?? true;
   const writeLimiter = new RateLimiter(60, 10 * 60_000);
+  const writeGlobal = new RateLimiter(Number(process.env.WRITES_PER_10MIN ?? 1000), 10 * 60_000);
   const llmLimiter = new RateLimiter(60, 10 * 60_000);
+  // Whole-server ceiling on LLM steps: bounds spend on the (free-tier) LLM keys even if per-IP keys are spoofed.
+  const llmGlobal = new RateLimiter(Number(process.env.LLM_STEPS_PER_10MIN ?? 300), 10 * 60_000);
   const mcpLimiter = new RateLimiter(300, 10 * 60_000);
   // The /mcp endpoint calls this same API over loopback; this per-process key lets those inner calls carry the
   // outer client's IP for rate limiting (nobody else can set it).
@@ -232,7 +245,7 @@ export function createHandler(deps: AppDeps) {
     const claimsAgent = agentTool !== undefined || agentSession !== undefined || headerMandate !== undefined;
     const isAgent = claimsAgent && typeof agentTool === "string" && agentTool.length > 0 && validSession(agentSession);
     const started = Date.now();
-    const fwd = deps.trustProxy ? String(req.headers["x-forwarded-for"] ?? "").split(",")[0].trim() : "";
+    const fwd = deps.trustProxy ? clientIpBehindProxy(req.headers) : "";
     const innerIp = isInternal(req.headers["x-internal-mcp"]) ? String(req.headers["x-mcp-client-ip"] ?? "").slice(0, 64) : "";
     const ip = innerIp || fwd || req.socket.remoteAddress || "unknown";
     let toolArgs: unknown = Object.fromEntries(url.searchParams);
@@ -254,7 +267,7 @@ export function createHandler(deps: AppDeps) {
       if (deps.merchantKey && !deps.publicMerchantView && !keyMatches(req.headers["x-merchant-key"], deps.merchantKey)) throw httpError(401, "merchant key required");
     };
     const limitWrites = () => {
-      if (!writeLimiter.allow(ip)) throw httpError(429, "too many requests, slow down");
+      if (!writeLimiter.allow(ip) || !writeGlobal.allow("*")) throw httpError(429, "too many requests, slow down");
     };
 
     try {
@@ -491,7 +504,7 @@ export function createHandler(deps: AppDeps) {
       // ---------- agent planner (LLM) ----------
       if (req.method === "POST" && path === "/api/agent/step") {
         if (!deps.llm) return send(res, 503, { error: "no LLM configured on this server", fallback: true });
-        if (!llmLimiter.allow(ip)) throw httpError(429, "agent step limit reached, try again later");
+        if (!llmLimiter.allow(ip) || !llmGlobal.allow("*")) throw httpError(429, "agent step limit reached, try again later");
         const input = validateStep(await readJson(req, 64 * 1024));
         try {
           return send(res, 200, await agentStep(deps.llm, input));
@@ -620,7 +633,7 @@ function gitVersion(): string {
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const port = Number(process.env.PORT ?? 8787);
-  const host = process.env.HOST ?? "127.0.0.1";
+  const host = process.env.HOST ?? (process.env.RENDER ? "0.0.0.0" : "127.0.0.1");
   const baseUrl = (process.env.PUBLIC_URL ?? process.env.RENDER_EXTERNAL_URL ?? `http://localhost:${port}`).replace(/\/$/, "");
   const cfg = configFromEnv();
   const own = new PayPalClient(cfg);
