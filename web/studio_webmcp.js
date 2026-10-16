@@ -32,7 +32,7 @@ export function toWebMcpTools(studioTools) {
         const ctl = new AbortController();
         const ctx = {
           signal: ctl.signal,
-          run: { threadId: "webmcp", runId: Math.random().toString(36).slice(2) },
+          run: { threadId: "webmcp", runId: globalThis.crypto?.randomUUID?.() ?? String(Date.now()) },
           success: (response, data) => ({ success: true, response, data }),
           error: (messages) => ({ success: false, issues: [].concat(messages).map((message) => ({ message })) }),
         };
