@@ -23,11 +23,12 @@ import os
 llm_file = os.environ.get("LLM_SECRETS_FILE", os.path.expanduser("~/.claude/secrets/meta_aittimes_app.json"))
 try:
     l = json.load(open(llm_file, encoding="utf-8"))
-    if l.get("gemini_api_key_2"):
-        pairs["GEMINI_API_KEY"] = l["gemini_api_key_2"]
+    gem = [l[k] for k in ("gemini_api_key_3", "gemini_api_key_4", "gemini_api_key_5", "gemini_api_key_6", "gemini_api_key_2") if l.get(k)]
+    if gem:
+        pairs["GEMINI_API_KEY"] = ",".join(gem)
         pairs["GEMINI_MODEL"] = "gemini-3-flash-preview"
-    if l.get("groq_api_key"):
-        pairs["GROQ_API_KEY"] = l["groq_api_key"]
+    if l.get("mistral_api_key"):
+        pairs["MISTRAL_API_KEY"] = l["mistral_api_key"]
 except (OSError, ValueError):
     pass
 # AG Studio trial licence (front-end key; kept out of git, injected into the merchant page via /api/config).

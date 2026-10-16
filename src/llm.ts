@@ -63,11 +63,12 @@ export class OpenAiCompatibleLlm implements Llm {
           return await this.chatWith(p, messages, tools);
         } catch (error) {
           const msg = (error as Error).message;
-          if (!/HTTP (429|5\d\d)/.test(msg) || attempt === 1) {
+          // 5xx: one short retry on the same provider. 429 (quota), timeouts, 4xx: go straight to the next one.
+          if (!/HTTP 5\d\d/.test(msg) || attempt === 1) {
             errors.push(msg);
             break;
           }
-          await new Promise((r) => setTimeout(r, 2000));
+          await new Promise((r) => setTimeout(r, 1500));
         }
       }
     }
@@ -95,19 +96,25 @@ export class OpenAiCompatibleLlm implements Llm {
 }
 
 /**
- * GEMINI_API_KEY (+ GEMINI_MODEL)  primary, Google's OpenAI-compatible endpoint (free tier)
- * GROQ_API_KEY   (+ GROQ_MODEL)    fallback, Groq (free tier)
- * Returns null when no key is set: the pipeline then uses the rule-based drafter only.
+ * GEMINI_API_KEY (+ GEMINI_MODEL)    primary, Google's OpenAI-compatible endpoint (free tier). Several keys may be
+ *                                    given comma-separated (separate free projects): a quota error moves to the next.
+ * MISTRAL_API_KEY (+ MISTRAL_MODEL)  fallback, Mistral La Plateforme (free tier)
+ * GROQ_API_KEY   (+ GROQ_MODEL)      fallback, Groq (free tier; set GROQ_MODEL to a model Groq still serves)
+ * Returns null when no key is set: the page then uses the rule-based planner only.
  */
 export function createLlm(env: NodeJS.ProcessEnv = process.env, fetchImpl: typeof fetch = fetch): Llm | null {
   const providers: Provider[] = [];
-  if (env.GEMINI_API_KEY) {
-    providers.push({ name: "gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", apiKey: env.GEMINI_API_KEY, model: env.GEMINI_MODEL || "gemini-2.5-flash" });
+  const geminiKeys = String(env.GEMINI_API_KEY ?? "").split(",").map((k) => k.trim()).filter(Boolean);
+  geminiKeys.forEach((apiKey, i) => {
+    providers.push({ name: geminiKeys.length > 1 ? `gemini#${i + 1}` : "gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", apiKey, model: env.GEMINI_MODEL || "gemini-3-flash-preview" });
+  });
+  if (env.MISTRAL_API_KEY) {
+    providers.push({ name: "mistral", baseUrl: "https://api.mistral.ai/v1", apiKey: env.MISTRAL_API_KEY, model: env.MISTRAL_MODEL || "ministral-14b-latest" });
   }
-  if (env.GROQ_API_KEY) {
-    providers.push({ name: "groq", baseUrl: "https://api.groq.com/openai/v1", apiKey: env.GROQ_API_KEY, model: env.GROQ_MODEL || "llama-3.3-70b-versatile" });
+  if (env.GROQ_API_KEY && env.GROQ_MODEL) {
+    providers.push({ name: "groq", baseUrl: "https://api.groq.com/openai/v1", apiKey: env.GROQ_API_KEY, model: env.GROQ_MODEL });
   }
-  return providers.length > 0 ? new OpenAiCompatibleLlm(providers, 30_000, fetchImpl) : null;
+  return providers.length > 0 ? new OpenAiCompatibleLlm(providers, Number(env.LLM_TIMEOUT_MS ?? 20_000), fetchImpl) : null;
 }
 
 /** Extracts the first JSON object from a model reply (handles ```json fences and chatter). */

@@ -28,7 +28,9 @@ services:
         sync: false
       - key: AG_STUDIO_LICENSE_KEY
         sync: false
-      - key: GEMINI_API_KEY
+      - key: GEMINI_API_KEY      # comma-separated free-tier keys; a quota error moves to the next
         sync: false
-      - key: GROQ_API_KEY
+      - key: MISTRAL_API_KEY
         sync: false
+      - key: LLM_STEPS_PER_10MIN
+        value: "60"
