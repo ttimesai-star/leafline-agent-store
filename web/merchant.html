@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Merchant panel - Leafline (PayPal sandbox)</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/vendor/ag-grid-community.min.js"></script>
+</head>
+<body>
+  <header class="top">
+    <a class="logo" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#2f6b4f" d="M20 3c-7 0-13 3-14 10-1 4 1 7 1 7s1-6 7-9c-4 3-6 7-6 10 0 0 7 0 10-6 2-4 2-8 2-12z"/></svg>Leafline</a>
+    <span class="tagline">Merchant panel: orders, agent journal, disputes</span>
+    <span class="spacer"></span>
+    <span class="badge warn"><span class="dot"></span>PayPal sandbox</span>
+    <a href="/">Store</a>
+  </header>
+  <div class="page" style="max-width:1280px">
+    <div class="kpis" id="kpis"></div>
+    <div class="tabs" role="tablist">
+      <button class="on" data-tab="orders">Orders</button>
+      <button data-tab="journal">Agent journal</button>
+      <button data-tab="cases">Disputes (DisputeDesk)</button>
+      <span class="spacer"></span>
+      <button id="refresh">Refresh</button>
+    </div>
+    <section data-pane="orders"><div class="gridbox" id="g-orders"></div></section>
+    <section data-pane="journal" hidden><div class="gridbox" id="g-journal"></div></section>
+    <section data-pane="cases" hidden>
+      <div id="paypal-note"></div>
+      <div class="desk">
+        <div class="gridbox" id="g-cases"></div>
+        <div class="panel" id="case"><p class="muted">Select a case to see the DisputeDesk assessment, the evidence draft and the agent receipt.</p></div>
+      </div>
+    </section>
+    <div id="msg"></div>
+  </div>
+  <footer class="foot">Tables: AG Grid Community (MIT). Dispute assessment: DisputeDesk rules engine. PayPal sandbox only.</footer>
+  <script type="module" src="/merchant.js"></script>
+</body>
+</html>

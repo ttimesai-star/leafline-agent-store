@@ -3,6 +3,7 @@
 
 export const SANDBOX_BASE = "https://api-m.sandbox.paypal.com";
 const ORDER_ID_RE = /^[A-Z0-9]{8,32}$/;
+const CAPTURE_ID_RE = /^[A-Z0-9]{8,32}$/;
 
 export interface PayPalConfig {
   clientId: string;
@@ -189,6 +190,31 @@ export class PayPalClient {
 
   captureOrder(id: string, requestId?: string): Promise<any> {
     return this.call("POST", `/v2/checkout/orders/${assertOrderId(id)}/capture`, {}, requestId ? { "PayPal-Request-Id": requestId } : {});
+  }
+
+  /** Payments v2: refund a capture (full refund when amount is omitted). Idempotent per requestId. */
+  refundCapture(captureId: string, opts: { amount?: string; currency?: string; note?: string } = {}, requestId?: string): Promise<any> {
+    if (!CAPTURE_ID_RE.test(captureId)) throw new Error("invalid PayPal capture id");
+    const body: Record<string, unknown> = {};
+    if (opts.amount) body.amount = { value: opts.amount, currency_code: opts.currency ?? "USD" };
+    if (opts.note) body.note_to_payer = opts.note.slice(0, 255);
+    return this.call("POST", `/v2/payments/captures/${captureId}/refund`, body, requestId ? { "PayPal-Request-Id": requestId } : {});
+  }
+
+  /** Disputes v1: the merchant's PayPal-side disputes (opened by buyers in PayPal, not via this store). */
+  listDisputes(pageSize = 20): Promise<any> {
+    const n = Math.min(Math.max(Math.trunc(pageSize) || 20, 1), 50);
+    return this.call("GET", `/v1/customer/disputes?page_size=${n}`);
+  }
+
+  getDispute(id: string): Promise<any> {
+    if (!/^PP-[A-Z0-9-]{6,40}$/.test(id)) throw new Error("invalid PayPal dispute id");
+    return this.call("GET", `/v1/customer/disputes/${id}`);
+  }
+
+  /** The client id is public (it ships to the browser in the JS SDK); the secret never leaves the server. */
+  get clientId(): string {
+    return this.cfg.clientId;
   }
 }
 

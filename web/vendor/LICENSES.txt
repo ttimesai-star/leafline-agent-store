@@ -1,0 +1,4 @@
+Third-party files in this folder (unmodified builds from npm):
+
+mcp-b-global.iife.js     @mcp-b/global 6.0.3       MIT  https://www.npmjs.com/package/@mcp-b/global
+ag-grid-community.min.js ag-grid-community 36.2.0  MIT  https://www.npmjs.com/package/ag-grid-community

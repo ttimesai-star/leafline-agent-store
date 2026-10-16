@@ -1,7 +1,7 @@
 // Agent call journal: every WebMCP tool call that reaches the server is recorded per agent session,
 // and the session is linked to the PayPal order it produced. receipt(orderId) = the agent's trail
 // for that order (what it searched, what it chose, what it paid) — usable later as dispute evidence.
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 export interface JournalEntry {
@@ -13,6 +13,8 @@ export interface JournalEntry {
   summary: string;
   orderId?: string;
   ms?: number;
+  /** Small, sanitized snapshot of what the agent was shown (e.g. sku + price + description of search hits). */
+  result?: unknown;
 }
 
 const SENSITIVE = /pass|secret|token|authorization|card|cvv/i;
@@ -42,12 +44,29 @@ export class AgentJournal {
 
   constructor(file?: string) {
     this.file = file;
-    if (file) mkdirSync(dirname(file), { recursive: true });
+    if (file) {
+      mkdirSync(dirname(file), { recursive: true });
+      if (existsSync(file)) {
+        for (const line of readFileSync(file, "utf8").split(/\r?\n/).slice(-20_000)) {
+          try {
+            const e = JSON.parse(line) as JournalEntry;
+            if (!validSession(e.session) || typeof e.tool !== "string") continue;
+            this.entries.push(e);
+            if (e.orderId && !this.orderSession.has(e.orderId)) this.orderSession.set(e.orderId, e.session);
+          } catch {
+            // skip partial lines
+          }
+        }
+      }
+    }
   }
 
   record(e: Omit<JournalEntry, "ts" | "args"> & { args: unknown }, now: Date = new Date()): JournalEntry {
     const entry: JournalEntry = { ...e, ts: now.toISOString(), args: sanitizeArgs(e.args) };
+    if (e.result !== undefined) entry.result = sanitizeArgs(e.result);
+    else delete entry.result;
     this.entries.push(entry);
+    if (this.entries.length > 20_000) this.entries.splice(0, this.entries.length - 20_000);
     if (entry.orderId && !this.orderSession.has(entry.orderId)) this.orderSession.set(entry.orderId, entry.session);
     if (this.file) appendFileSync(this.file, JSON.stringify(entry) + "\n");
     return entry;
@@ -59,6 +78,16 @@ export class AgentJournal {
     if (!session) return { orderId, session: null, calls: [] };
     const calls = this.entries.filter((e) => e.session === session && (!e.orderId || e.orderId === orderId));
     return { orderId, session, calls };
+  }
+
+  /** Link a later order to the session explicitly (e.g. an order created by the agent, captured by the human). */
+  linkOrder(orderId: string, session: string): void {
+    if (!this.orderSession.has(orderId)) this.orderSession.set(orderId, session);
+  }
+
+  /** Newest first, for the merchant panel. */
+  list(limit = 500): JournalEntry[] {
+    return this.entries.slice(-Math.min(Math.max(limit, 1), 5000)).reverse();
   }
 
   stats(): { calls: number; sessions: number; orders: number } {

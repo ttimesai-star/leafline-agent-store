@@ -37,7 +37,7 @@ export function searchProducts(query: string, opts: { maxPrice?: number; limit?:
   const terms = String(query ?? "").toLowerCase().split(/[^a-z0-9-]+/).filter(Boolean);
   const limit = Math.min(Math.max(opts.limit ?? 5, 1), 20);
   const scored = PRODUCTS.map((p) => {
-    const hay = `${p.name} ${p.description} ${p.tags.join(" ")} ${p.sku}`.toLowerCase();
+    const hay = `${p.name} ${p.description} ${p.tags.join(" ")} ${p.category} ${p.sku}`.toLowerCase();
     const score = terms.length ? terms.filter((t) => hay.includes(t)).length : 1;
     return { p, score };
   })

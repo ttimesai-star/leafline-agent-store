@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Order - Leafline (PayPal sandbox)</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="top">
+    <a class="logo" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#2f6b4f" d="M20 3c-7 0-13 3-14 10-1 4 1 7 1 7s1-6 7-9c-4 3-6 7-6 10 0 0 7 0 10-6 2-4 2-8 2-12z"/></svg>Leafline</a>
+    <span class="tagline">Order details</span>
+    <span class="spacer"></span>
+    <span class="badge warn"><span class="dot"></span>PayPal sandbox</span>
+    <a href="/">Back to the store</a>
+  </header>
+  <div class="page">
+    <div id="banner"></div>
+    <section class="panel">
+      <h2>Order <span class="sku" id="oid"></span></h2>
+      <div class="kv" id="summary"></div>
+      <paypal-button id="pay" type="pay" hidden style="margin-top:.8rem;max-width:320px"></paypal-button>
+    </section>
+    <section class="panel" id="receipt-panel" hidden>
+      <h2>Agent receipt <small>what the buyer's AI agent did, call by call</small></h2>
+      <ul class="timeline" id="receipt"></ul>
+    </section>
+    <section class="panel">
+      <h2>Need help with this order?</h2>
+      <div id="claims"></div>
+      <div id="claim-form" hidden>
+        <div class="two">
+          <div><label for="c-kind">Request</label><select id="c-kind"><option value="REFUND_REQUEST">Refund</option><option value="DISPUTE">Report a problem</option></select></div>
+          <div><label for="c-reason">Reason</label><select id="c-reason">
+            <option value="OTHER">Other / changed my mind</option>
+            <option value="MERCHANDISE_OR_SERVICE_NOT_RECEIVED">Item not received</option>
+            <option value="MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED">Not as described</option>
+            <option value="DUPLICATE_TRANSACTION">Charged twice</option>
+            <option value="INCORRECT_AMOUNT">Wrong amount</option>
+          </select></div>
+        </div>
+        <label for="c-note">Message to the merchant</label>
+        <textarea id="c-note" rows="2" maxlength="500"></textarea>
+        <button class="primary" id="c-send" style="margin-top:.5rem">Send to the merchant</button>
+      </div>
+      <p class="muted" id="claim-hint"></p>
+    </section>
+  </div>
+  <footer class="foot">Prototype, PayPal sandbox only.</footer>
+  <script type="module" src="/order.js"></script>
+</body>
+</html>

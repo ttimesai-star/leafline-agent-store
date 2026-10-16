@@ -3,24 +3,102 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Agent-ready store (PayPal sandbox spike)</title>
-  <style>
-    body { font: 15px/1.4 system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; }
-    li { margin: .4rem 0; } button { margin-left: .5rem; }
-    pre { background: #f4f4f4; padding: .6rem; overflow: auto; font-size: 12px; }
-    .note { color: #666; font-size: 13px; }
-  </style>
+  <title>Leafline - an agent-ready store on PayPal (sandbox)</title>
+  <meta name="description" content="A tea and coffee store that AI agents can shop through WebMCP tools, within a budget the buyer delegates, paying with PayPal.">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script>
+    // Record whether the browser itself provides WebMCP before the polyfill wraps it.
+    window.__nativeWebMCP = Boolean(document.modelContext || navigator.modelContext);
+    // MCP-B polyfill options: expose the page's WebMCP tools over MCP only to this origin (browser extension
+    // content scripts post from the page origin). On Chrome with native WebMCP the polyfill wraps the native API.
+    window.__webModelContextOptions = { transport: { tabServer: { allowedOrigins: [location.origin] } } };
+  </script>
+  <script src="/vendor/mcp-b-global.iife.js"></script>
 </head>
 <body>
-  <h1>Agent-ready store</h1>
-  <p class="note">Prototype, PayPal sandbox only. AI agents can use WebMCP tools: search_products, create_order, get_order_status. Payment approval always stays with the human buyer in PayPal.</p>
-  <input id="search" placeholder="Search products" autocomplete="off">
-  <ul id="products"></ul>
-  <p id="msg"></p>
-  <h3>WebMCP status</h3>
-  <pre id="webmcp">checking…</pre>
-  <h3>Order</h3>
-  <pre id="order">—</pre>
+  <header class="top">
+    <a class="logo" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#2f6b4f" d="M20 3c-7 0-13 3-14 10-1 4 1 7 1 7s1-6 7-9c-4 3-6 7-6 10 0 0 7 0 10-6 2-4 2-8 2-12z"/></svg>Leafline</a>
+    <span class="tagline">Tea and coffee. Shop yourself, or let your AI agent shop for you.</span>
+    <span class="spacer"></span>
+    <span class="badge warn" title="PayPal sandbox: no real money moves"><span class="dot"></span>PayPal sandbox</span>
+    <span class="badge" id="webmcp-badge" title="WebMCP status"><span class="dot"></span>WebMCP: checking</span>
+    <a href="/merchant">Merchant panel</a>
+  </header>
+
+  <main class="shop">
+    <section>
+      <div class="toolbar">
+        <input id="search" placeholder="Search tea, coffee, teaware..." autocomplete="off" aria-label="Search products">
+        <div class="chips" id="cats">
+          <button class="chip on" data-cat="">All</button>
+          <button class="chip" data-cat="tea">Tea</button>
+          <button class="chip" data-cat="coffee">Coffee</button>
+          <button class="chip" data-cat="teaware">Teaware</button>
+          <button class="chip" data-cat="gift">Gift</button>
+        </div>
+      </div>
+      <div class="grid" id="products"></div>
+    </section>
+
+    <aside class="side">
+      <div class="panel" id="cart-panel">
+        <h2>Your cart</h2>
+        <ul class="lines" id="cart"></ul>
+        <div class="total"><span>Total</span><span id="cart-total">0.00 USD</span></div>
+        <paypal-button id="cart-pay" type="pay" hidden></paypal-button>
+        <button class="pay-fallback" id="cart-pay-redirect" hidden>Pay with PayPal (redirect)</button>
+        <div id="cart-msg"></div>
+      </div>
+
+      <div class="panel" id="agent-panel">
+        <h2>Shop with an AI agent <small>WebMCP</small></h2>
+        <div id="mandate-form">
+          <p class="muted">Give an agent a budget. The store refuses any agent order outside it, and you still approve every payment in PayPal.</p>
+          <div class="two">
+            <div><label for="m-budget">Budget, USD</label><input id="m-budget" type="number" min="1" max="200" step="1" value="40"></div>
+            <div><label for="m-per">Max per order, USD</label><input id="m-per" type="number" min="1" max="200" step="1" placeholder="optional"></div>
+          </div>
+          <label>Allowed categories</label>
+          <div class="cats" id="m-cats">
+            <label><input type="checkbox" value="tea" checked> tea</label>
+            <label><input type="checkbox" value="coffee" checked> coffee</label>
+            <label><input type="checkbox" value="teaware" checked> teaware</label>
+            <label><input type="checkbox" value="gift"> gift</label>
+          </div>
+          <div class="two">
+            <div><label for="m-ttl">Valid for</label><select id="m-ttl"><option value="30">30 min</option><option value="60" selected>1 hour</option><option value="1440">1 day</option></select></div>
+            <div style="align-self:end"><button class="primary" id="m-create" style="width:100%">Delegate budget</button></div>
+          </div>
+        </div>
+        <div id="mandate-view" hidden></div>
+
+        <div id="task-box" hidden>
+          <label for="task">What should the agent buy?</label>
+          <textarea id="task" rows="2">Buy green tea and a mug</textarea>
+          <div class="examples">
+            <button data-task="Buy green tea and a mug">green tea + mug</button>
+            <button data-task="Coffee beans and a pour-over dripper">coffee + dripper</button>
+            <button data-task="A gooseneck kettle and matcha">kettle + matcha</button>
+          </div>
+          <button class="primary" id="run-agent" style="width:100%">Run the in-page agent</button>
+          <p class="muted" id="planner-note"></p>
+        </div>
+        <div id="agent-order" hidden>
+          <div class="notice info" id="agent-order-text"></div>
+          <paypal-button id="agent-pay" type="pay" hidden></paypal-button>
+          <a id="agent-pay-link" href="#" target="_blank" rel="noopener" hidden>Approve on PayPal instead</a>
+        </div>
+        <h2 style="margin-top:1rem">Agent activity <small>every tool call, as the store journals it</small></h2>
+        <ul class="feed" id="feed"><li class="muted">No agent calls yet. External agents (MCP-B extension, Chrome WebMCP) see the same six tools.</li></ul>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="foot">
+    Prototype for the PayPal AI Hackathon. PayPal <b>sandbox</b> only, no real money. Prices are set by the server; agents can create orders but never approve or capture payments.
+    <span id="version"></span>
+  </footer>
   <script type="module" src="/store.js"></script>
 </body>
 </html>
