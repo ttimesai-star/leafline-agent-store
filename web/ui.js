@@ -16,7 +16,7 @@ export function art(category) {
 }
 
 export function notice(el, kind, text) {
-  el.innerHTML = text ? `<div class="notice ${kind}">${esc(text)}</div>` : "";
+  el.innerHTML = text ? `<div class="notice ${esc(kind)}">${esc(text)}</div>` : "";
 }
 
 export async function getJson(url, opts) {

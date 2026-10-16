@@ -69,6 +69,9 @@ export function factsForOrder(order: OrderRecord, reason: string, status: string
   };
 }
 
+/** Journal snapshots go into evidence text verbatim except for control characters and runs of whitespace. */
+const oneLine = (v: unknown, max = 300) => String(v ?? "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
+
 /** Evidence built only from the store's own journal: no invented ids, every claim traceable to a journal line. */
 export function agentEvidence(order: OrderRecord, ctx: AgentContext, reason: string): { evidence: Evidence[]; summary: string | null } {
   if (order.channel !== "agent" || ctx.calls.length === 0) return { evidence: [], summary: null };
@@ -77,7 +80,7 @@ export function agentEvidence(order: OrderRecord, ctx: AgentContext, reason: str
   const createsInSession = ctx.calls.filter((c) => c.tool === "create_order" && c.ok).length;
   const m = ctx.mandate;
   const lines = [
-    `Order ${order.orderId} was assembled by the buyer's AI agent (session ${order.session}) through the store's WebMCP tools: ${ctx.calls.length} journaled call(s), ${searches.length} search(es) before create_order${create ? ` at ${create.ts}` : ""}.`,
+    `Order ${order.orderId} was assembled by the buyer's AI agent (session ${order.session}) through the store's agent tools (WebMCP / MCP): ${ctx.calls.length} journaled call(s), ${searches.length} search(es) before create_order${create ? ` at ${create.ts}` : ""}.`,
     m ? `The buyer delegated a spending mandate ${m.mandateId}: budget ${m.budget} ${m.currency}${m.perOrderMax ? `, per-order max ${m.perOrderMax}` : ""}${m.categories ? `, categories ${m.categories.join("/")}` : ""}; the server checked this order against it before creating the PayPal order.` : null,
     order.captureId ? `The buyer approved the payment personally in PayPal; the store captured it (capture ${order.captureId}${order.capturedAt ? ` at ${order.capturedAt}` : ""}). The agent cannot approve or capture payments.` : null,
   ].filter(Boolean) as string[];
@@ -89,7 +92,7 @@ export function agentEvidence(order: OrderRecord, ctx: AgentContext, reason: str
       .flatMap((s) => (Array.isArray(s.result) ? (s.result as any[]) : []))
       .filter((r) => order.items.some((i) => i.sku === r?.sku) && !seen.has(r.sku) && Boolean(seen.add(r.sku)));
     if (shown.length) {
-      evidence.push({ evidence_type: "ITEM_DESCRIPTION", notes: `Product data the agent was shown before ordering: ${shown.slice(0, 3).map((r) => `${r.sku} "${r.description ?? r.name}" at ${r.price} USD`).join("; ")}.` });
+      evidence.push({ evidence_type: "ITEM_DESCRIPTION", notes: `Product data the agent was shown before ordering: ${shown.slice(0, 3).map((r) => `${oneLine(r.sku, 40)} "${oneLine(r.description ?? r.name)}" at ${oneLine(r.price, 12)} USD`).join("; ")}.` });
     }
   }
   if (reason === "DUPLICATE_TRANSACTION") {

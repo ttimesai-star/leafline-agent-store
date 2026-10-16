@@ -82,7 +82,9 @@ export class OpenAiCompatibleLlm implements Llm {
       signal: AbortSignal.timeout(this.timeoutMs),
     });
     if (!res.ok) {
-      const detail = (await res.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 200);
+      let detail = (await res.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 200);
+      // Some providers echo the request (and key) in error bodies; strip it before it reaches any log.
+      if (p.apiKey && p.apiKey.length >= 6) detail = detail.split(p.apiKey).join("***");
       throw new Error(`${p.name} LLM HTTP ${res.status}: ${detail}`);
     }
     const data = (await res.json()) as { choices?: { message?: { content?: string | null; tool_calls?: ToolCall[] } }[] };

@@ -173,7 +173,19 @@ export function createHandler(deps: AppDeps) {
     });
   }
 
-  async function capture(id: string) {
+  // One capture per order at a time: onApprove and the return URL can fire together (Jules review).
+  const inFlightCaptures = new Map<string, Promise<ReturnType<typeof orderView>>>();
+  const inFlightRefunds = new Set<string>();
+
+  function capture(id: string) {
+    const running = inFlightCaptures.get(id);
+    if (running) return running;
+    const task = captureOnce(id).finally(() => inFlightCaptures.delete(id));
+    inFlightCaptures.set(id, task);
+    return task;
+  }
+
+  async function captureOnce(id: string) {
     const rec = await loadOrder(id);
     // Already captured (PayPal return URL reloaded, onApprove + return both fired): read, do not capture again.
     if (rec.status === "COMPLETED" && rec.captureId) return orderView(await deps.payments.getOrder(id));
@@ -193,8 +205,13 @@ export function createHandler(deps: AppDeps) {
     const path = url.pathname;
     const agentTool = req.headers["x-agent-tool"];
     const agentSession = req.headers["x-agent-session"];
-    const isAgent = typeof agentTool === "string" && validSession(agentSession);
     const headerMandate = req.headers["x-agent-mandate"];
+    // Agents identify themselves with these headers (WebMCP tools and the MCP server always send them). A request
+    // with only some of them is refused below instead of silently being treated as a human (Jules review).
+    // An agent that sends none of them looks like a human: the real limit is that every payment needs the buyer's
+    // own approval in PayPal (see README, threat model).
+    const claimsAgent = agentTool !== undefined || agentSession !== undefined || headerMandate !== undefined;
+    const isAgent = claimsAgent && typeof agentTool === "string" && agentTool.length > 0 && validSession(agentSession);
     const started = Date.now();
     const fwd = deps.trustProxy ? String(req.headers["x-forwarded-for"] ?? "").split(",")[0].trim() : "";
     const innerIp = isInternal(req.headers["x-internal-mcp"]) ? String(req.headers["x-mcp-client-ip"] ?? "").slice(0, 64) : "";
@@ -205,10 +222,10 @@ export function createHandler(deps: AppDeps) {
       deps.journal.record({ session: agentSession as string, tool: String(agentTool).slice(0, 40), args: toolArgs, ok, summary, orderId, ms: Date.now() - started, result });
     };
     const humanOnly = (what: string) => {
-      if (isAgent || typeof agentTool === "string") throw httpError(403, `${what} is buyer-only: an agent cannot do this`);
+      if (claimsAgent) throw httpError(403, `${what} is buyer-only: an agent cannot do this`);
     };
     const merchantOnly = () => {
-      if (isAgent || typeof agentTool === "string") throw httpError(403, "merchant actions are not available to agents");
+      if (claimsAgent) throw httpError(403, "merchant actions are not available to agents");
       if (deps.merchantKey && req.headers["x-merchant-key"] !== deps.merchantKey) throw httpError(401, "merchant key required");
     };
     const limitWrites = () => {
@@ -251,6 +268,10 @@ export function createHandler(deps: AppDeps) {
         await mcp.connect(transport);
         await transport.handleRequest(req, res, body);
         return;
+      }
+
+      if (claimsAgent && !isAgent && (path.startsWith("/api/") || path.startsWith("/paypal/"))) {
+        throw httpError(400, "agent requests need X-Agent-Tool and X-Agent-Session (6-64 chars A-Z a-z 0-9 _ -)");
       }
 
       if (req.method === "GET" && path === "/api/health") return send(res, 200, { ok: true, version: deps.version ?? "dev", sandbox: true, toolkit: deps.payments.toolkit?.version ?? null });
@@ -493,9 +514,16 @@ export function createHandler(deps: AppDeps) {
           return send(res, 200, orders.resolveClaim(claim.claimId, { status: "DECLINED", resolution: String(body?.reason ?? "declined by merchant").slice(0, 200) }, now()));
         }
         if (!o.captureId) return send(res, 409, { error: "order has no capture to refund" });
-        const r = await deps.payments.refundCapture(o.captureId, { note: `Refund for order ${o.orderId} (${claim.claimId})` }, `refund-${claim.claimId}`);
-        orders.addRefund(o.orderId, { refundId: String(r?.id ?? ""), amount: String(r?.amount?.value ?? o.total), status: String(r?.status ?? ""), at: now().toISOString(), claimId: claim.claimId });
-        return send(res, 200, orders.resolveClaim(claim.claimId, { status: "REFUNDED", resolution: `refund ${r?.id ?? ""} ${r?.status ?? ""}`.trim(), refundId: r?.id ?? null }, now()));
+        // PayPal-Request-Id already makes the refund idempotent at PayPal; the lock keeps our records single.
+        if (inFlightRefunds.has(claim.claimId)) return send(res, 409, { error: "a refund for this claim is already in progress" });
+        inFlightRefunds.add(claim.claimId);
+        try {
+          const r = await deps.payments.refundCapture(o.captureId, { note: `Refund for order ${o.orderId} (${claim.claimId})` }, `refund-${claim.claimId}`);
+          orders.addRefund(o.orderId, { refundId: String(r?.id ?? ""), amount: String(r?.amount?.value ?? o.total), status: String(r?.status ?? ""), at: now().toISOString(), claimId: claim.claimId });
+          return send(res, 200, orders.resolveClaim(claim.claimId, { status: "REFUNDED", resolution: `refund ${r?.id ?? ""} ${r?.status ?? ""}`.trim(), refundId: r?.id ?? null }, now()));
+        } finally {
+          inFlightRefunds.delete(claim.claimId);
+        }
       }
 
       const ma = path.match(/^\/api\/merchant\/disputes\/(PP-[A-Z0-9-]{6,40})\/accept$/);

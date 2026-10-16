@@ -3,8 +3,15 @@
 // on the server, the system prompt is fixed here (the client cannot replace it), and only the store's own
 // tool names are accepted. When no LLM key is configured the browser falls back to a rule-based planner.
 import type { ChatMessage, Llm, ToolCall, ToolSpec } from "./llm.ts";
+import { buildStoreTools } from "../web/webmcp.js";
 
 export const AGENT_TOOL_NAMES = ["search_products", "get_budget", "create_order", "get_order_status", "request_refund", "open_dispute"] as const;
+
+// Tool descriptions and schemas the LLM sees come from the store's own definition (web/webmcp.js), never from
+// the client: a page cannot rewrite what a tool claims to do (Jules review). Built once, no network use.
+const CANONICAL = new Map<string, { description: string; inputSchema: unknown }>(
+  buildStoreTools({ fetchImpl: (() => Promise.reject(new Error("unused"))) as any, session: "ag_canonical" }).map((t: any) => [t.name, { description: t.description, inputSchema: t.inputSchema }]),
+);
 
 export const SYSTEM_PROMPT = [
   "You are a shopping agent acting for one human buyer on an online tea and coffee store (PayPal sandbox demo).",
@@ -51,17 +58,20 @@ export function validateStep(body: any): StepInput {
         : [];
       return calls.length ? { role: "assistant", content: m.content == null ? null : str(m.content), tool_calls: calls } : { role: "assistant", content: str(m.content) };
     }
-    if (m?.role === "tool") return { role: "tool", tool_call_id: str(m.tool_call_id, 80), content: str(m.content) };
+    if (m?.role === "tool") {
+      const id = str(m.tool_call_id, 80);
+      if (!id) throw new Error("tool messages need a tool_call_id");
+      return { role: "tool", tool_call_id: id, content: str(m.content) };
+    }
     throw new Error("message role must be user, assistant or tool");
   });
   if (messages[0].role !== "user") throw new Error("conversation must start with the buyer's request");
   const tools = Array.isArray(body?.tools) ? body.tools : [];
   const specs: ToolSpec[] = tools.slice(0, 10).map((t: any) => {
     const name = str(t?.name, 40);
-    if (!(AGENT_TOOL_NAMES as readonly string[]).includes(name)) throw new Error(`unknown tool: ${name}`);
-    const params = t?.inputSchema && typeof t.inputSchema === "object" ? t.inputSchema : { type: "object", properties: {} };
-    if (JSON.stringify(params).length > 3000) throw new Error("tool schema too large");
-    return { type: "function", function: { name, description: str(t?.description, 600), parameters: params } };
+    const canon = CANONICAL.get(name);
+    if (!(AGENT_TOOL_NAMES as readonly string[]).includes(name) || !canon) throw new Error(`unknown tool: ${name}`);
+    return { type: "function", function: { name, description: canon.description, parameters: canon.inputSchema as any } };
   });
   if (!specs.length) throw new Error("no tools: the page must expose its WebMCP tools");
   return { messages, tools: specs };
