@@ -2,6 +2,10 @@
 
 Status: **prototype**, PayPal **sandbox only**, not audited. Not a product.
 
+Live demo (sandbox): **https://leafline-agent-store.onrender.com** - store `/`, merchant panel `/merchant`, MCP
+endpoint `POST /mcp`. Free Render instance: the first request after ~15 idle minutes takes up to a minute, and the
+order book resets to the seeded sandbox orders on every restart.
+
 An agent-ready storefront: a small tea shop on PayPal Orders v2 that lets AI agents shop for a buyer inside a
 spending mandate the buyer sets, while every payment is still approved by the buyer in PayPal.
 
@@ -16,7 +20,15 @@ spending mandate the buyer sets, while every payment is still approved by the bu
 - **Merchant side on the PayPal Agent Toolkit** (`@paypal/agent-toolkit` 1.11.0, `src/toolkit.ts`): order status
   (`get_order`), PayPal disputes (`list_disputes`, `get_dispute`, `accept_dispute_claim`), refunds
   (`create_refund`, `get_refund`). Post-purchase claims go to a DisputeDesk module that cites the agent journal
-  as evidence; the merchant refunds or accepts the dispute from the panel (AG Grid Community).
+  as evidence; the merchant refunds or accepts the dispute from the panel (AG Grid Community tables).
+- **Merchant analytics on AG Studio 3.0** (`web/analytics.js`): a pre-built report over the store's own records
+  (orders, order lines, agent call journal, DisputeDesk cases, joined by order id) - agent vs human revenue,
+  refused agent calls by tool, claim value by DisputeDesk advice - with cross-filtering and an "Edit layout" switch
+  to Studio's drag-and-drop editor.
+- **The dashboard is agent-readable too** (`web/studio_webmcp.js`): AG Studio's AI module (Studio Agent
+  Framework) tools `view_schema`, `view_page`, `view_widget`, `execute_query` are published over WebMCP as
+  read-only `dashboard_*` tools, so an agent in the merchant's browser can query the analytics
+  ("allowed vs refused agent calls by tool") instead of scraping charts. Mutating Studio tools are not exposed.
 
 ## Run
 
@@ -26,7 +38,15 @@ npm test                                              # unit + HTTP + MCP-client
 scripts/with-sandbox-env.sh node src/server.ts        # http://localhost:8787 (store, /order, /merchant, /mcp)
 scripts/with-sandbox-env.sh node scripts/toolkit_smoke.ts             # live Toolkit check (read-only)
 scripts/with-sandbox-env.sh python scripts/e2e_browser.py --flags     # full browser E2E against the running store
+node scripts/reset_demo_data.ts [--apply] [--wipe] [--export-seed demo/seed]   # clean test orders (store stopped)
+python scripts/render_deploy.py                       # deploy the public demo, check live version == HEAD
 ```
+
+Environment (all optional except the PayPal pair): `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` (sandbox app),
+`MERCHANT_KEY` (signs merchant actions), `PUBLIC_MERCHANT_VIEW=1` (demo: panel readable without the key),
+`AG_STUDIO_LICENSE_KEY` (AG Studio trial key; without it Studio shows a watermark), `GEMINI_API_KEY` (one or
+more comma-separated keys), `MISTRAL_API_KEY`, `DATA_DIR`, `DEMO_SEED_DIR`, `LLM_STEPS_PER_10MIN`,
+`WRITES_PER_10MIN`. `scripts/with-sandbox-env.sh` fills them from a secrets file outside the repo.
 
 Connect an external agent (the buyer first delegates a budget on the store page and copies the mandate id):
 
@@ -53,7 +73,18 @@ node scripts/mcp_client.ts --url http://localhost:8787 --mandate md_... call cre
   can create orders inside it; each still needs buyer approval. The buyer can revoke it at any time.
 - **Prices come from the server catalog**; agents send only `sku` + `quantity`.
 - **Merchant actions** (refund, decline, accept dispute) refuse agent headers and require `X-Merchant-Key` when
-  `MERCHANT_KEY` is set. Merchant read endpoints are open in this demo.
+  `MERCHANT_KEY` is set (constant-time check). Merchant views (all buyers' orders, journal, cases, Toolkit log)
+  refuse agent headers and also need the key, except on the public demo (`PUBLIC_MERCHANT_VIEW=1`), where they
+  are readable so the panel can be judged - all data there is sandbox data with masked payer emails. The panel
+  takes the key from a `#key=` URL fragment (never sent to the server) or a form, keeps it in `sessionStorage`.
+- **Dashboard WebMCP tools are read-only** (`readOnlyHint`) and see only what the panel shows. Any agent the
+  merchant runs in that browser tab can read the analytics; none can change the report or touch money.
+- **Rate limits behind the proxy**: the client IP comes from `CF-Connecting-IP` (Render is behind Cloudflare)
+  before the client-controlled `X-Forwarded-For`; on top of per-IP limits there are whole-server ceilings for LLM
+  steps and writes, so spoofed IPs cannot burn the free LLM quotas or flood the sandbox.
+- **AG Studio licence key** is a front-end key by design (it ends up in the page); it is injected from env via
+  `/api/config` and never committed. The trial keys expire on 12.11.2026 (Grid/Charts) and 16.11.2026 (Studio);
+  after that the live demo shows AG's watermark until a new key is set.
 - **PayPal Agent Toolkit 1.11.0 guards** (found in its source): `run()` / `handleToolCall` execute any tool name
   regardless of the configured actions, so the server enforces its own allow-list of six tools before `run()`;
   the Toolkit caches its OAuth token forever, so we pass our own refreshed token; refund idempotency needs a
@@ -68,7 +99,13 @@ node scripts/mcp_client.ts --url http://localhost:8787 --mandate md_... call cre
 
 ## Verified
 
-- Unit, HTTP and MCP-client tests: **64/64** (`npm test`), including the official MCP SDK client over Streamable
+- 16.10.2026, public Render deployment (version checked against the commit), Chrome 155 with the WebMCP flag:
+  `scripts/e2e_browser.py --url https://leafline-agent-store.onrender.com --flags` **18/18**, twice - the 15 steps
+  below plus the AG Studio dashboard: licensed render, four `dashboard_*` tools registered in native WebMCP, and
+  `dashboard_execute_query` answering allowed vs refused agent calls by tool. Second run with the LLM planner
+  (Gemini 3 Flash); the first fell back to rules (free-tier quota), which led to the multi-key chain.
+- Merchant key on: the same claims flow with `MERCHANT_KEY` set passes 8/8 (panel sends `X-Merchant-Key`).
+- Unit, HTTP and MCP-client tests: **79/79** (`npm test`), including the official MCP SDK client over Streamable
   HTTP and over stdio (child process): order inside the mandate; over-budget, per-order, category, revoked and
   no-mandate refusals.
 - Live sandbox, 16.10.2026, Chrome 155 with the WebMCP flag, `scripts/e2e_browser.py`: **15/15**, twice — human
@@ -90,7 +127,10 @@ MCP-B polyfill (`@mcp-b/global`, MIT) provides the same surface.
 
 ## Reviews
 
-Independent code review by Google Jules (sessions 1877010590083434047, 11669279245805133758). Taken: fail-closed
+Independent code review by Google Jules (sessions 1877010590083434047, 11669279245805133758, 4709167192530215068).
+From 4709167192530215068, all taken: PayPal REST error bodies recognised as Toolkit errors, a refund without a
+refund id is an error (claim stays open), `/mcp` transport closed once on every path, Toolkit log merchant-only.
+Earlier, taken: fail-closed
 agent detection, single in-flight capture per order and refund per claim, server-side tool descriptions for the
 LLM step, `tool_call_id` validation, key stripping in LLM error bodies, escaping in `notice()`, control-character
 cleanup in evidence. Not taken: replacing journal snapshots in evidence with the current catalog (evidence must
